@@ -129,7 +129,7 @@ void scanKeysTask(void *pvParameters) {
   const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
   int8_t knob3RotationLocal = 0;
-  Knob Knob3(0);
+  Knob Knob3(0,0,8);
   int curIndex = 0;
   int prevIndex = 0;
   uint8_t TX_Message[8] = {0};

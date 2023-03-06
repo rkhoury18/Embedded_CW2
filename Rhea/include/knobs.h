@@ -5,15 +5,18 @@ class Knob
 {
     public:
         Knob(uint8_t prevAB,int8_t min,int8_t max)
-            : _curRotVal(0),_prevAB(prevAB),_min(min),_max(max){}
+            : _curRotVal(0),_prevAB(prevAB),_min(min),_max(max),_prevfunc(0){}
 
     void UpdateRotateVal (uint8_t curAB){
         switch (curAB | _prevAB<<2){
-            case 0x01: increment(); break;
-            case 0x04: decrement(); break;
+            case 0x01 : increment(); break;
+            // case 0x03 : impossibleState(); break;
+            case 0x04 : decrement(); break;
+            // case 0x06 : impossibleState(); break;
             case 0x0B : decrement(); break;
+            // case 0x0A : impossibleState(); break;
             case 0x0E : increment(); break;
-            case 0x0C : increment(); break;
+            case 0x0C : impossibleState(); break;
             default: break;
         }
         _prevAB = curAB;
@@ -36,6 +39,7 @@ class Knob
         return _curRotVal;
     }
     private:
+        int _prevfunc;
         int _min;
         int _max;
         int8_t _curRotVal;
@@ -44,11 +48,18 @@ class Knob
         void increment (){
             if (_curRotVal < _max){
                 _curRotVal++;
+                _prevfunc = 1;
             }
         }
         void decrement (){
             if (_curRotVal > _min){
                 _curRotVal--;
+                _prevfunc = -1;
+            }
+        }
+        void impossibleState (){
+            if (_curRotVal < _max && _curRotVal > _min){
+                _curRotVal+= _prevfunc;
             }
         }
 

@@ -1,5 +1,3 @@
-#include <stm32l4xx_hal_cortex.h>
-
 //Initialise the CAN module
 uint32_t CAN_Init(bool loopback=false);
 

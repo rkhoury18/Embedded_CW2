@@ -5,14 +5,14 @@
 #include <ES_CAN.h>
 #include "knobs.h"
 
-#define sender 0
-//#define reciever 0
+// #define sender 0
+#define reciever 0
 
 //Constants
   const uint32_t interval = 100; //Display update interval
   const uint32_t stepSizes[12] = {50953930, 54077542, 57396381, 60715219, 64229283, 68133799, 72233540, 76528508, 81018701, 85899345, 90975216, 96441538};
   const char notes[12] = {'C','C','D','D','E','F','F','G','G','A','A','B'};
-  const char sharps[12] = {'','#','','#','','','#','','#','','#',''};
+  const char sharps[12] = {' ','#',' ','#',' ',' ','#',' ','#',' ','#',' '};
 //global variables  
   volatile uint32_t currentStepSize;
   volatile uint32_t mastercurrentStepSize;
@@ -173,7 +173,7 @@ void scanKeysTask(void * pvParameters) {
                 localstepsize = stepSizes[idx]<<shift;
               }
               else{
-                localstepsize = stepSizes[idx]>>shift;
+                localstepsize = stepSizes[idx]>>-shift;
               }
               localnote = notes[idx];
               localsharp = sharps[idx];

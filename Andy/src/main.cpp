@@ -170,7 +170,7 @@ void scanKeysTask(void * pvParameters) {
                 localstepsize = stepSizes[idx]<<shift;
               }
               else{
-                localstepsize = stepSizes[idx]>>shift;
+                localstepsize = stepSizes[idx]>>-shift;
               }
               localnote = notes[idx];
               localsharp = sharps[idx];
@@ -179,7 +179,7 @@ void scanKeysTask(void * pvParameters) {
           }
         }
         else{
-          uint8_t currentBA = val & 0x03; //00000011 select last 2 bits
+          uint8_t currezntBA = val & 0x03; //00000011 select last 2 bits
           switch (previousBA){
             case 0: 
               if(currentBA == 1 && localknob3rotation<8){

@@ -5,8 +5,12 @@
 #include <ES_CAN.h>
 #include "knobs.h"
 
-// #define sender 0
-#define reciever 0
+#define sender 0
+//#define reciever 0
+
+//#define DISABLE_THREADS
+//#define TEST_SCAN_KEYS
+//#define TEST_DISPLAY_UPDATE
 
 //Constants
   const uint32_t interval = 100; //Display update interval
@@ -14,14 +18,16 @@
   const char notes[12] = {'C','C','D','D','E','F','F','G','G','A','A','B'};
   const char sharps[12] = {' ','#',' ','#',' ',' ','#',' ','#',' ','#',' '};
 //global variables  
-  volatile uint32_t currentStepSize;
-  volatile uint32_t mastercurrentStepSize;
+  //volatile uint32_t currentStepSize;
+  //volatile uint32_t mastercurrentStepSize;
   volatile char currentnote;
   volatile char currentsharp;
   volatile uint8_t knob3rotation = 4;
   volatile uint8_t knob2rotation = 4;
-
   volatile uint8_t keyArray[7];
+  volatile uint32_t localrangekeyarray[12] = {0};
+  volatile uint32_t fullrangekeyarray[24] = {0};
+  SemaphoreHandle_t localrangekeyarrayMutex;
   SemaphoreHandle_t keyArrayMutex;
   SemaphoreHandle_t CAN_TX_Semaphore;
   QueueHandle_t msgInQ;
@@ -88,11 +94,39 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
 }
 
 void sampleISR() {
-  static uint32_t phaseAcc = 0;
-  phaseAcc += currentStepSize;
-  int32_t Vout = (phaseAcc >> 24) - 128;
-  Vout = Vout >> (8 - knob3rotation);
-  analogWrite(OUTR_PIN, Vout + 128);
+  static uint32_t phaseAcc[36] = {0};
+  int32_t polyphony_vout = 0;
+  for(uint8_t i=0; i<12; i++){
+    phaseAcc[i] += localrangekeyarray[i];
+    int32_t Vout = (phaseAcc[i] >> 24) - 128;
+    Vout = Vout >> (8 - knob3rotation);
+    // if (polyphony_vout + Vout > 127){
+    //   polyphony_vout = 127;
+    // }
+    // else if (polyphony_vout + Vout < -128){
+    //   polyphony_vout = -128;
+    // }
+    // else{
+    // polyphony_vout += Vout;
+    // }
+    polyphony_vout += Vout;
+  }
+  for(uint8_t i=0; i<24; i++){
+    phaseAcc[12+i] += fullrangekeyarray[i];
+    int32_t Vout = (phaseAcc[12+i] >> 24) - 128;
+    Vout = Vout >> (8 - knob3rotation);
+    // if (polyphony_vout + Vout > 127){
+    //   polyphony_vout = 127;
+    // }
+    // else if (polyphony_vout + Vout < -128){
+    //   polyphony_vout = -128;
+    // }
+    // else{
+    // polyphony_vout += Vout;
+    // }
+    polyphony_vout += Vout;
+  }
+  analogWrite(OUTR_PIN, polyphony_vout + 128);
 }
 
 #ifdef reciever
@@ -105,7 +139,6 @@ void CAN_RX_ISR (void) {
 
 void decodeTask(void * pvParameters){
   uint32_t recievestep;
-  uint32_t localstep;
   while(1){
     xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
     if (RX_Message[0] == 'R'){
@@ -120,11 +153,11 @@ void decodeTask(void * pvParameters){
         recievestep = stepSizes[RX_Message[2]]>>-shift;
       }
     }
-    localstep = recievestep ? recievestep:mastercurrentStepSize;
-  __atomic_store_n(&currentStepSize, localstep, __ATOMIC_RELAXED);
+    fullrangekeyarray[(12*RX_Message[3])+RX_Message[2]] = recievestep;//write step size for keys recoeved from sending keyboards
   }
 }
 #endif
+
 #ifdef sender
 void CAN_TX_ISR (void) {
 	xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
@@ -141,77 +174,282 @@ void CAN_TX_Task (void * pvParameters) {
 #endif
 
 
+
 void scanKeysTask(void * pvParameters) {
-  const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
-  TickType_t xLastWakeTime = xTaskGetTickCount();
-  Knob Knob3(0,0,8);
-  Knob Knob2(0,0,8);
-  uint8_t localprevkey = -1;
-  uint8_t TX_Message[8] = {0};
-  while(1){
-      vTaskDelayUntil( &xLastWakeTime, xFrequency );
-      uint32_t localstepsize = 0;
-      char localnote = 0;
-      char localsharp = 0;
-      uint8_t localknob3rotation = knob3rotation;
-      uint8_t localknob2rotation = knob2rotation;
-      for (uint8_t i = 0; i < 4; i++){
-        setRow(i);
-        delayMicroseconds(3);
-        uint8_t val = readCols();
+  #ifndef TEST_SCAN_KEYS
+    const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    Knob Knob3(0,0,8);
+    Knob Knob2(0,0,8);
+    uint16_t prevfullkeys = 0;
+    uint16_t fullkeys = 0;
+    uint8_t TX_Message[8] = {0};
+    while(1){
+        vTaskDelayUntil( &xLastWakeTime, xFrequency );
+        uint32_t localstepsize = 0;
+        char localnote = currentnote;
+        char localsharp = currentsharp;
+        uint8_t localknob3rotation = knob3rotation;
+        uint8_t localknob2rotation = knob2rotation;
+        uint8_t localkeyArray[7] = {0};
+        for (uint8_t i = 0; i < 4; i++){
+          setRow(i);
+          delayMicroseconds(3);
+          uint8_t val = readCols();
+          localkeyArray[i] = val;
+        }
         xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-        keyArray[i] = val;
+          memcpy((void*)keyArray, localkeyArray, sizeof(localkeyArray));
         xSemaphoreGive(keyArrayMutex);
-        uint8_t onehot = val^0x0F; //00001111 invert last 4 bits
-        if (i < 3){
-          for(int j = 0; j<4;j++){
-            if (onehot & (1<<j)){
-              uint8_t idx = 4*i + j;
-              //u8g2.print(idx,DEC);
-              int8_t shift = localknob2rotation - 4;
-              if(shift > 0){
-                localstepsize = stepSizes[idx]<<shift;
+        fullkeys = localkeyArray[0] | (localkeyArray[1]<<4) | (localkeyArray[2]<<8);
+
+        uint8_t currentBA_3 = localkeyArray[3] & 0x03; //00000011 select last 2 bits
+        uint8_t currentBA_2 = (localkeyArray[3] & 0x0C)>>2; //000011 select last 2 bits
+        Knob3.UpdateRotateVal(currentBA_3);
+        Knob2.UpdateRotateVal(currentBA_2);
+        localknob3rotation = Knob3.CurRotVal();
+        localknob2rotation = Knob2.CurRotVal();
+
+        uint16_t onehot = fullkeys^0xFFF; //00001111 invert last 4 bits
+        uint16_t difference = onehot^prevfullkeys;
+        if(difference){
+          uint8_t idx_array[12] = {12,12,12,12,12,12,12,12,12,12,12,12};
+          uint8_t c = 0;
+          while(difference){
+            uint8_t idx = __builtin_ctz(difference);
+            idx_array[c] = (idx);
+            difference &= ~(1<<idx);
+            c++;
+          }
+          if(onehot>prevfullkeys){ //current is bigger than previous key is pressed
+            localnote = notes[idx_array[0]];
+            localsharp = sharps[idx_array[0]];
+            #ifdef sender
+            for (uint8_t i = 0; i < 12; i++){
+              if (idx_array[i] != 12) {
+                TX_Message[0] = 'P';
+                TX_Message[1] = localknob2rotation;
+                TX_Message[2] = idx_array[i];
+                TX_Message[3] = sender;    
+                xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
               }
               else{
-                localstepsize = stepSizes[idx]>>-shift;
+                break;
               }
-              localnote = notes[idx];
-              localsharp = sharps[idx];
-              localprevkey = idx;
             }
+            #endif
+
+            #ifdef reciever
+            int8_t shift = localknob2rotation-4;
+            xSemaphoreTake(localrangekeyarrayMutex, portMAX_DELAY);
+            for (uint8_t i = 0; i < 12; i++){
+              if (idx_array[i] != 12) {
+                if(shift > 0){
+                  localstepsize = stepSizes[idx_array[i]]<<shift;
+                }
+                else{
+                  localstepsize = stepSizes[idx_array[i]]>>-shift;
+                }
+                Serial.print("localstepsize: ");
+                Serial.println(localstepsize);
+                localrangekeyarray[idx_array[i]] = localstepsize;
+              }
+              else{
+                break;
+              }
+            }
+            xSemaphoreGive(localrangekeyarrayMutex);
+            #endif
+          }
+          else{
+            if(!onehot){ //if no keys are pressed
+                localnote = ' ';
+                localsharp = ' ';
+              }
+            else{
+              uint8_t curr_idx = __builtin_ctz(onehot);
+              localnote = notes[curr_idx];
+              localsharp = sharps[curr_idx];
+            }
+            #ifdef sender
+              for (uint8_t i = 0; i < 12; i++){
+                if (idx_array[i] != 12) {
+                  TX_Message[0] = 'R';
+                  TX_Message[1] = localknob2rotation;
+                  TX_Message[2] = idx_array[i];
+                  TX_Message[3] = sender;    
+                  xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+                }
+                else{
+                  break;
+                }
+              }
+            #endif
+            
+            #ifdef reciever
+            xSemaphoreTake(localrangekeyarrayMutex, portMAX_DELAY);
+            for (uint8_t i = 0; i < 12; i++){
+              if (idx_array[i] != 12) {
+                localrangekeyarray[idx_array[i]] = 0;
+              }
+              else{
+                break;
+              }
+            }
+            xSemaphoreGive(localrangekeyarrayMutex);
+            #endif
           }
         }
-        else{
-          uint8_t currentBA_3 = val & 0x03; //00000011 select last 2 bits
-          uint8_t currentBA_2 = (val & 0x0C)>>2; //000011 select last 2 bits
-          Knob3.UpdateRotateVal(currentBA_3);
-          Knob2.UpdateRotateVal(currentBA_2);
-          localknob3rotation = Knob3.CurRotVal();
-          localknob2rotation = Knob2.CurRotVal();  
+        prevfullkeys = onehot;
+        // for (uint8_t i = 0; i < 4; i++){
+        //   setRow(i);
+        //   delayMicroseconds(3);
+        //   uint8_t val = readCols();
+        //   xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+        //   keyArray[i] = val;
+        //   xSemaphoreGive(keyArrayMutex);
+        //   uint8_t onehot = val^0x0F; //00001111 invert last 4 bits
+        //   if (i < 3){
+        //     uint8_t difference = onehot^prevkeyarray[i];
+        //     if(difference){
+        //       uint8_t idx = 4*i + __builtin_ctz(difference);
+        //       Serial.println("idx:");
+        //       Serial.println(idx);
+        //       if (onehot>prevkeyarray[i]){ //current is bigger than previous key is pressed, also presume only one key can be pressed at a time
+        //         localnote = notes[idx];
+        //         localsharp = sharps[idx];
+        //         #ifdef sender
+        //           TX_Message[0] = 'P';
+        //           TX_Message[1] = localknob2rotation;
+        //           TX_Message[2] = idx;
+        //           TX_Message[3] = sender;              
+        //         #endif
+        //         int8_t shift = localknob2rotation-4;
+        //         if(shift > 0){
+        //           localstepsize = stepSizes[idx]<<shift;
+        //         }
+        //         else{
+        //           localstepsize = stepSizes[idx]>>-shift;
+        //         }
+        //         xSemaphoreTake(localrangekeyarrayMutex, portMAX_DELAY);
+        //           localrangekeyarray[idx] = localstepsize;
+        //         xSemaphoreGive(localrangekeyarrayMutex);
+        //       }
+        //       else{ //current is smaller than previous key is released
+        //           if(!onehot){ //if no keys are pressed
+        //             localnote = ' ';
+        //             localsharp = ' ';
+        //           }
+        //           else{
+        //             uint8_t curr_idx = 4*i + __builtin_ctz(onehot);
+        //             localnote = notes[curr_idx];
+        //             localsharp = sharps[curr_idx];
+        //           }
+        //         #ifdef sender
+        //           TX_Message[0] = 'R';
+        //           TX_Message[1] = localknob2rotation;
+        //           TX_Message[2] = idx;
+        //           TX_Message[3] = sender;
+        //         #endif
+        //         xSemaphoreTake(localrangekeyarrayMutex, portMAX_DELAY);
+        //           fullrangekeyarray[idx] = 0;
+        //         xSemaphoreGive(localrangekeyarrayMutex);
+        //       }
+        //     #ifdef sender
+        //       xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+        //     #endif
+        //     }
+        //     else{
+        //       // uint8_t curr_idx = 4*i + __builtin_ctz(onehot);
+        //       // localnote = notes[curr_idx];
+        //       // localsharp = sharps[curr_idx];
+        //     }
+        //     prevkeyarray[i] = onehot;
+        //   }
+        //   else{
+        //     uint8_t currentBA_3 = val & 0x03; //00000011 select last 2 bits
+        //     uint8_t currentBA_2 = (val & 0x0C)>>2; //000011 select last 2 bits
+        //     Knob3.UpdateRotateVal(currentBA_3);
+        //     Knob2.UpdateRotateVal(currentBA_2);
+        //     localknob3rotation = Knob3.CurRotVal();
+        //     localknob2rotation = Knob2.CurRotVal();  
+        //   }
+        // }
+    __atomic_store_n(&currentnote, localnote, __ATOMIC_RELAXED);
+    __atomic_store_n(&currentsharp, localsharp, __ATOMIC_RELAXED);
+    __atomic_store_n(&knob3rotation, localknob3rotation, __ATOMIC_RELAXED);
+    __atomic_store_n(&knob2rotation, localknob2rotation, __ATOMIC_RELAXED);
+    }
+  #else
+    uint8_t localprevkey = -1;
+    uint8_t TX_Message[8] = {0};
+    uint32_t localstepsize = 0;
+    char localnote = 0;
+    char localsharp = 0;
+    uint8_t localknob3rotation = knob3rotation;
+    uint8_t localknob2rotation = knob2rotation;
+    Knob Knob3(0,0,8);
+    Knob Knob2(0,0,8);
+    for (uint8_t idx = 0; idx < 12; idx++){
+      for (uint8_t i = 0; i < 4; i++){
+          setRow(i);
+          delayMicroseconds(3);
+          uint8_t val = readCols();
+          xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+          keyArray[i] = val;
+          xSemaphoreGive(keyArrayMutex);
+          uint8_t onehot = val^0x0F; //00001111 invert last 4 bits
+          if (i < 3){
+            for(int j = 0; j<4;j++){
+              if (onehot & (1<<j)){
+                uint8_t idx = 4*i + j;
+                //u8g2.print(idx,DEC);
+                int8_t shift = localknob2rotation - 4;
+                if(shift > 0){
+                  localstepsize = stepSizes[idx]<<shift;
+                }
+                else{
+                  localstepsize = stepSizes[idx]>>-shift;
+                }
+                localnote = notes[idx];
+                localsharp = sharps[idx];
+                localprevkey = idx;
+              }
+            }
+          }
+          else{
+            uint8_t currentBA_3 = val & 0x03; //00000011 select last 2 bits
+            uint8_t currentBA_2 = (val & 0x0C)>>2; //000011 select last 2 bits
+            Knob3.UpdateRotateVal(currentBA_3);
+            Knob2.UpdateRotateVal(currentBA_2);
+            localknob3rotation = Knob3.CurRotVal();
+            localknob2rotation = Knob2.CurRotVal();  
+          }
         }
-      }
-    #ifdef sender
-      if(localnote){
+      localstepsize = stepSizes[idx];
+      localnote = notes[idx];
+      localsharp = sharps[idx];
+      localprevkey = idx;
+      localknob3rotation = 0;
+      localknob2rotation = 0;
+
       TX_Message[0] = 'P';
-      TX_Message[1] = localknob2rotation;
+      TX_Message[1] = 4;
       TX_Message[2] = localprevkey;
-    }
-    else if(localprevkey != 255){
-      TX_Message[0] = 'R';
-      TX_Message[1] = localknob2rotation;
-      TX_Message[2] = localprevkey;
-    }
-    xQueueSend( msgOutQ, TX_Message, portMAX_DELAY);
-  #endif
-  __atomic_store_n(&mastercurrentStepSize, localstepsize, __ATOMIC_RELAXED);
-  __atomic_store_n(&currentnote, localnote, __ATOMIC_RELAXED);
-  __atomic_store_n(&currentsharp, localsharp, __ATOMIC_RELAXED);
-  __atomic_store_n(&knob3rotation, localknob3rotation, __ATOMIC_RELAXED);
-  __atomic_store_n(&knob2rotation, localknob2rotation, __ATOMIC_RELAXED);
+      
+      xQueueSend( msgOutQ, TX_Message, portMAX_DELAY);
+    __atomic_store_n(&mastercurrentStepSize, localstepsize, __ATOMIC_RELAXED);
+    __atomic_store_n(&currentnote, localnote, __ATOMIC_RELAXED);
+    __atomic_store_n(&currentsharp, localsharp, __ATOMIC_RELAXED);
+    __atomic_store_n(&knob3rotation, localknob3rotation, __ATOMIC_RELAXED);
+    __atomic_store_n(&knob2rotation, localknob2rotation, __ATOMIC_RELAXED);
   }
+  #endif
 }
 
+
 void displayUpdateTask(void * pvParameters){
+  #ifndef TEST_DISPLAY_UPDATE
   const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
   while(1){
@@ -220,9 +458,9 @@ void displayUpdateTask(void * pvParameters){
     u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
     u8g2.setCursor(2,10);
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-      u8g2.print(keyArray[0],HEX);
-      u8g2.print(keyArray[1],HEX);
-      u8g2.print(keyArray[2],HEX);
+    u8g2.print(keyArray[0],HEX);
+    u8g2.print(keyArray[1],HEX);
+    u8g2.print(keyArray[2],HEX);
     xSemaphoreGive(keyArrayMutex);
     u8g2.setCursor(2,20);
     u8g2.print(knob3rotation,DEC);
@@ -232,15 +470,43 @@ void displayUpdateTask(void * pvParameters){
     u8g2.print(currentnote);
     u8g2.print(currentsharp);
 
-    // u8g2.setCursor(66,30);
-    // u8g2.print((char) RX_Message[0]);
-    // u8g2.print(RX_Message[1]);
-    // u8g2.print(RX_Message[2]);
+    u8g2.setCursor(66,30);
+    u8g2.print((char) RX_Message[0]);
+    u8g2.print(RX_Message[1]);
+    u8g2.print(RX_Message[2]);
 
     u8g2.sendBuffer();          
     //Toggle LED
     digitalToggle(LED_BUILTIN);
   }
+  #else
+   for (uint8_t idx = 0; idx < 1; idx++){
+    u8g2.clearBuffer();         // clear the internal memory
+    u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
+    u8g2.setCursor(2,10);
+    xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+    u8g2.print(idx,HEX);
+    u8g2.print(idx,HEX);
+    u8g2.print(idx,HEX);
+    xSemaphoreGive(keyArrayMutex);
+    u8g2.setCursor(2,20);
+    u8g2.print(idx,DEC);
+    u8g2.setCursor(10,20);
+    u8g2.print(idx,DEC);
+    u8g2.setCursor(2,30);
+    u8g2.print((char)(idx+65));
+    u8g2.print((char)(idx+65));
+
+    u8g2.setCursor(66,30);
+    u8g2.print((char) (idx+65));
+    u8g2.print(idx);
+    u8g2.print(idx);
+
+    u8g2.sendBuffer();          
+    //Toggle LED
+    digitalToggle(LED_BUILTIN);
+  }
+  #endif
 }
 
 uint8_t one_hot_decode(uint8_t onehot){
@@ -261,50 +527,108 @@ void setup() {
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
   msgInQ = xQueueCreate(36,8);
-  msgOutQ = xQueueCreate(36,8);
+  #ifndef TEST_SCAN_KEYS
+    msgOutQ = xQueueCreate(36,8);
+  #else
+    msgOutQ = xQueueCreate(384,8);
+  #endif
 
+  #ifndef DISABLE_THREADS
+    TaskHandle_t scanKeysHandle = NULL;
+    xTaskCreate(
+    scanKeysTask,		/* Function that implements the task */
+    "scanKeys",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    2,			/* Task priority */
+    &scanKeysHandle );  /* Pointer to store the task handle */
+
+    TaskHandle_t displayUpdateTaskHandle = NULL;
+    xTaskCreate(
+    displayUpdateTask,		/* Function that implements the task */
+    "displayUpdate",		/* Text name for the task */
+    256,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    1,			/* Task priority */
+    &displayUpdateTaskHandle );
+    
+    #ifdef reciever
+    TaskHandle_t decodeTaskHandle = NULL;
+    xTaskCreate(
+    decodeTask,		/* Function that implements the task */
+    "decode",		/* Text name for the task */
+    256,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    3,			/* Task priority */
+    &decodeTaskHandle);
+    #endif
+
+    #ifdef sender
+    TaskHandle_t CAN_TX_TaskHandle = NULL;
+    xTaskCreate(
+    CAN_TX_Task,		/* Function that implements the task */
+    "CanTX",		/* Text name for the task */
+    256,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    3,			/* Task priority */
+    &CAN_TX_TaskHandle);
+    #endif
+  #endif
+
+  #ifdef TEST_SCAN_KEYS
   TaskHandle_t scanKeysHandle = NULL;
-  xTaskCreate(
-  scanKeysTask,		/* Function that implements the task */
-  "scanKeys",		/* Text name for the task */
-  64,      		/* Stack size in words, not bytes */
-  NULL,			/* Parameter passed into the task */
-  2,			/* Task priority */
-  &scanKeysHandle );  /* Pointer to store the task handle */
+    xTaskCreate(
+    scanKeysTask,		/* Function that implements the task */
+    "scanKeys",		/* Text name for the task */
+    64,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    2,			/* Task priority */
+    &scanKeysHandle );  /* Pointer to store the task handle */
+  #endif
+
+  #ifdef TEST_DISPLAY_UPDATE
   TaskHandle_t displayUpdateTaskHandle = NULL;
-  xTaskCreate(
-  displayUpdateTask,		/* Function that implements the task */
-  "displayUpdate",		/* Text name for the task */
-  256,      		/* Stack size in words, not bytes */
-  NULL,			/* Parameter passed into the task */
-  1,			/* Task priority */
-  &displayUpdateTaskHandle );
-  
-  #ifdef reciever
+    xTaskCreate(
+    displayUpdateTask,		/* Function that implements the task */
+    "displayUpdate",		/* Text name for the task */
+    256,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    1,			/* Task priority */
+    &displayUpdateTaskHandle );
+  #endif
+
+  #ifdef TEST_DECODE
   TaskHandle_t decodeTaskHandle = NULL;
-  xTaskCreate(
-  decodeTask,		/* Function that implements the task */
-  "decode",		/* Text name for the task */
-  256,      		/* Stack size in words, not bytes */
-  NULL,			/* Parameter passed into the task */
-  3,			/* Task priority */
-  &decodeTaskHandle);
+    xTaskCreate(
+    decodeTask,		/* Function that implements the task */
+    "decode",		/* Text name for the task */
+    256,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    3,			/* Task priority */
+    &decodeTaskHandle);
   #endif
-  #ifdef sender
+
+  #ifdef TEST_CAN_TX
   TaskHandle_t CAN_TX_TaskHandle = NULL;
-  xTaskCreate(
-  CAN_TX_Task,		/* Function that implements the task */
-  "CanTX",		/* Text name for the task */
-  256,      		/* Stack size in words, not bytes */
-  NULL,			/* Parameter passed into the task */
-  3,			/* Task priority */
-  &CAN_TX_TaskHandle);
+    xTaskCreate(
+    CAN_TX_Task,		/* Function that implements the task */
+    "CanTX",		/* Text name for the task */
+    256,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    3,			/* Task priority */
+    &CAN_TX_TaskHandle);
   #endif
+
+  localrangekeyarrayMutex = xSemaphoreCreateMutex();
   keyArrayMutex = xSemaphoreCreateMutex();
   CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
+  
   sampleTimer->setOverflow(22000, HERTZ_FORMAT);
-  sampleTimer->attachInterrupt(sampleISR);
+  #ifndef DISABLE_THREADS
+    sampleTimer->attachInterrupt(sampleISR);
+  #endif
   sampleTimer->resume();
+  
   bool mode = false;
   #ifdef sender
     #ifdef reciever
@@ -312,11 +636,16 @@ void setup() {
     #endif
   #endif
   CAN_Init(mode);
-  #ifdef reciever
-  CAN_RegisterRX_ISR(CAN_RX_ISR);
+  #ifndef DISABLE_THREADS
+    #ifdef reciever
+    CAN_RegisterRX_ISR(CAN_RX_ISR);
+    #endif
   #endif
-  #ifdef sender
-  CAN_RegisterTX_ISR(CAN_TX_ISR);
+
+  #ifndef DISABLE_THREADS
+    #ifdef sender
+    CAN_RegisterTX_ISR(CAN_TX_ISR);
+    #endif
   #endif
   setCANFilter(0x123,0x7ff);
   CAN_Start();
@@ -348,7 +677,25 @@ void setup() {
   Serial.begin(9600);
   Serial.println("Hello World");
 
-  vTaskStartScheduler();
+  #ifdef DISABLE_THREADS
+    uint32_t startTime = micros();
+    #ifdef TEST_SCAN_KEYS
+      for (int iter = 0; iter < 32; iter++) {
+        scanKeysTask(NULL);
+      }
+    #endif
+    #ifdef TEST_DISPLAY_UPDATE
+      for (int iter = 0; iter < 32; iter++) {
+        displayUpdateTask(NULL);
+      }
+    #endif
+    Serial.println(micros()-startTime);
+    while(1);
+  #endif
+
+  #ifndef DISABLE_THREADS
+    vTaskStartScheduler();
+  #endif
 }
 
 void loop() {

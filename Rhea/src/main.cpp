@@ -4,6 +4,8 @@
 #include "knobs.h"
 #include <ES_CAN.h>
 
+#define sender
+#define receiver
 
 
 //Constants
@@ -45,18 +47,22 @@
   volatile uint8_t keyArray[7];
   SemaphoreHandle_t keyArrayMutex;
   SemaphoreHandle_t RXMessageMutex;
-  int8_t knob3Rotation;     
+  int8_t knob3Rotation;
+  int8_t knob2Rotation;     
   QueueHandle_t msgInQ;
   QueueHandle_t msgOutQ;
   volatile uint8_t RX_Message[8]={0};   
-  SemaphoreHandle_t CAN_TX_Semaphore;                                                          
+  SemaphoreHandle_t CAN_TX_Semaphore;     
 
-void CAN_RX_ISR (void) {
-	uint8_t RX_Message_ISR[8];
-	uint32_t ID;
-	CAN_RX(ID, RX_Message_ISR);
-	xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
-}
+
+#ifdef receiver
+  void CAN_RX_ISR (void) {
+    uint8_t RX_Message_ISR[8];
+    uint32_t ID;
+    CAN_RX(ID, RX_Message_ISR);
+    xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
+  }
+#endif
 
 
 uint8_t readCols(){
@@ -113,23 +119,15 @@ int getIndex() {
   return index;
 }
 
-int getIncrement(uint8_t input){
-  switch (input)
-  {
-    case 0x01: return 1;
-    case 0x04: return -1;
-    case 0x0B : return -1;
-    case 0x0E : return 1;
-    case 0x0C : return 1;
-    default: return 0;
-  }
-}
-
 void scanKeysTask(void *pvParameters) {
   const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
   int8_t knob3RotationLocal = 0;
+  int8_t knob2RotationLocal = 0;
   Knob Knob3(0,0,8);
+  Knob Knob2(0,0,8);
+  Knob3.SetLimits(0,8);
+  Knob2.SetLimits(0,8);
   int curIndex = 0;
   int prevIndex = 0;
   uint8_t TX_Message[8] = {0};
@@ -144,13 +142,15 @@ void scanKeysTask(void *pvParameters) {
       }
       uint32_t localCurrentStepSize = 0;
       Knob3.UpdateRotateVal(keyArray[3] & 0x03);
-      Knob3.SetLimits(0,8);
+      Knob2.UpdateRotateVal((keyArray[3] & 0x0C)>>2);
+
       knob3RotationLocal =Knob3.CurRotVal();
+      knob2RotationLocal =Knob2.CurRotVal();
       if (keyArray[0]==15 && keyArray[1]==15 && keyArray[2]==15){
         curIndex = 12;
         if (prevIndex != curIndex){
           TX_Message[0]='R';
-          TX_Message[1]= 4;
+          TX_Message[1]= knob2RotationLocal;
           TX_Message[2]= prevIndex;
         }
       }
@@ -159,7 +159,7 @@ void scanKeysTask(void *pvParameters) {
         localCurrentStepSize = stepSizes[curIndex];
         if (prevIndex != curIndex){
           TX_Message[0]='P';
-          TX_Message[1]= 4;
+          TX_Message[1]= knob2RotationLocal;
           TX_Message[2]= curIndex;
         }
       }
@@ -167,6 +167,7 @@ void scanKeysTask(void *pvParameters) {
       prevIndex = curIndex;
       xSemaphoreGive(keyArrayMutex);
       __atomic_store_n(&knob3Rotation, knob3RotationLocal, __ATOMIC_RELAXED);
+      __atomic_store_n(&knob2Rotation, knob2RotationLocal, __ATOMIC_RELAXED);
       __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
 
   }
@@ -190,6 +191,8 @@ void displayUpdateTask(void *pvParameters){
     u8g2.print(keyArray[2],HEX);
     u8g2.setCursor(20,30);
     u8g2.print(knob3Rotation,HEX);
+    u8g2.setCursor(40,30);
+    u8g2.print(knob2Rotation,HEX);
     xSemaphoreGive(keyArrayMutex);
     u8g2.setCursor(66,30);
     xSemaphoreTake(RXMessageMutex, portMAX_DELAY);
@@ -207,30 +210,32 @@ void displayUpdateTask(void *pvParameters){
   }
 }
 
-void decodeTask (void *pvParameters){
-  uint32_t LocalcurrentStepSize;
-  uint8_t LocalRX_Message[8]={0};
-  while (1) {
-    xQueueReceive(msgInQ, LocalRX_Message, portMAX_DELAY);
-    if (LocalRX_Message[0]=='R'){
-      LocalcurrentStepSize=0;
-    }
-    else {
-      LocalcurrentStepSize =(stepSizes[LocalRX_Message[2]]) << (LocalRX_Message[1]-4);
-    }
-    xSemaphoreTake(RXMessageMutex, portMAX_DELAY);
-      for (int i=0 ; i<8 ; i++){
-        RX_Message[i]=LocalRX_Message[i];
+#ifdef receiver
+  void decodeTask (void *pvParameters){
+    uint32_t LocalcurrentStepSize;
+    uint8_t LocalRX_Message[8]={0};
+    while (1) {
+      xQueueReceive(msgInQ, LocalRX_Message, portMAX_DELAY);
+      if (LocalRX_Message[0]=='R'){
+        LocalcurrentStepSize=0;
       }
-    xSemaphoreGive(RXMessageMutex);
-     
-    __atomic_store_n(&currentStepSize, LocalcurrentStepSize, __ATOMIC_RELAXED);
+      else {
+        int8_t shift = LocalRX_Message[1]-4;
+        LocalcurrentStepSize =shift<0 ? (stepSizes[LocalRX_Message[2]]) >> -shift :(stepSizes[LocalRX_Message[2]]) << shift;
+      }
+      xSemaphoreTake(RXMessageMutex, portMAX_DELAY);
+        for (int i=0 ; i<8 ; i++){
+          RX_Message[i]=LocalRX_Message[i];
+        }
+      xSemaphoreGive(RXMessageMutex);
+      
+      __atomic_store_n(&currentStepSize, LocalcurrentStepSize, __ATOMIC_RELAXED);
 
+    }
   }
+#endif
 
-
-}
-
+#ifdef sender
 void CAN_TX_Task (void * pvParameters) {
 	uint8_t msgOut[8];
 	while (1) {
@@ -243,6 +248,7 @@ void CAN_TX_Task (void * pvParameters) {
 void CAN_TX_ISR (void) {
 	xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
 }
+#endif
 
 
 
@@ -261,6 +267,7 @@ void setup() {
   3,			/* Task priority */
   &scanKeysHandle );
 
+#ifdef sender
   TaskHandle_t CAN_TX_Handle = NULL;
   xTaskCreate(
   CAN_TX_Task,		/* Function that implements the task */
@@ -269,6 +276,7 @@ void setup() {
   NULL,			/* Parameter passed into the task */
   2,			/* Task priority */
   &CAN_TX_Handle );
+#endif
 
   TaskHandle_t displayUpdateHandle = NULL;
   xTaskCreate(
@@ -279,6 +287,7 @@ void setup() {
   1,			/* Task priority */
   &displayUpdateHandle );
 
+#ifdef receiver
   TaskHandle_t decodeHandle = NULL;
   xTaskCreate(
   decodeTask,		/* Function that implements the task */
@@ -287,11 +296,17 @@ void setup() {
   NULL,			/* Parameter passed into the task */
   3,			/* Task priority */
   &decodeHandle );
+#endif
 
-  CAN_Init(false);
+
+  CAN_Init(true);
   setCANFilter(0x123,0x7ff);
-  CAN_RegisterRX_ISR(CAN_RX_ISR);
-  CAN_RegisterTX_ISR(CAN_TX_ISR);
+  #ifdef receiver
+    CAN_RegisterRX_ISR(CAN_RX_ISR);
+  #endif
+  #ifdef sender
+    CAN_RegisterTX_ISR(CAN_TX_ISR);
+  #endif
   CAN_Start();
 
   //Set pin directions

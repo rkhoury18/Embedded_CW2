@@ -5,14 +5,14 @@
 #include <ES_CAN.h>
 #include "knobs.h"
 
-#define sender 0
-//#define reciever 0
+// #define sender 0
+#define reciever 0
 
 //Constants
   const uint32_t interval = 100; //Display update interval
   const uint32_t stepSizes[12] = {50953930, 54077542, 57396381, 60715219, 64229283, 68133799, 72233540, 76528508, 81018701, 85899345, 90975216, 96441538};
   const char notes[12] = {'C','C','D','D','E','F','F','G','G','A','A','B'};
-  const char sharps[12] = {'','#','','#','','','#','','#','','#',''};
+  const char sharps[12] = {' ','#',' ','#',' ',' ','#',' ','#',' ','#',' '};
 //global variables  
   volatile uint32_t currentStepSize;
   volatile uint32_t mastercurrentStepSize;
@@ -182,55 +182,12 @@ void scanKeysTask(void * pvParameters) {
           }
         }
         else{
-<<<<<<< HEAD
-          uint8_t currezntBA = val & 0x03; //00000011 select last 2 bits
-          switch (previousBA){
-            case 0: 
-              if(currentBA == 1 && localknob3rotation<8){
-                localknob3rotation++;
-                prevfunc = 1;
-              }
-              else if(currentBA == 3 && localknob3rotation>0 && localknob3rotation<8){
-                localknob3rotation+=prevfunc;
-              }
-              break;
-            case 1:
-              if(currentBA == 0 && localknob3rotation>0){
-                localknob3rotation--;
-                prevfunc = -1;
-              }
-              else if(currentBA == 2 && localknob3rotation>0 && localknob3rotation<8){
-                localknob3rotation+=prevfunc;
-              }
-              break;
-            case 2:
-              if(currentBA == 3 && localknob3rotation>0){
-                localknob3rotation--;
-                prevfunc = -1;
-              }
-              else if(currentBA == 1 && localknob3rotation>0 && localknob3rotation<8){
-                localknob3rotation+=prevfunc;
-              }
-              break;
-            case 3:
-              if(currentBA == 2 && localknob3rotation<8){
-                localknob3rotation++;
-                prevfunc = 1;
-              }
-              else if(currentBA == 0 && localknob3rotation>0 && localknob3rotation<8){
-                localknob3rotation+=prevfunc;
-              }
-              break;
-          }
-          previousBA = currentBA;    
-=======
           uint8_t currentBA_3 = val & 0x03; //00000011 select last 2 bits
           uint8_t currentBA_2 = (val & 0x0C)>>2; //000011 select last 2 bits
           Knob3.UpdateRotateVal(currentBA_3);
           Knob2.UpdateRotateVal(currentBA_2);
           localknob3rotation = Knob3.CurRotVal();
           localknob2rotation = Knob2.CurRotVal();  
->>>>>>> c9419d761ac7d55a920114dc094d2cfd455678c1
         }
       }
     #ifdef sender

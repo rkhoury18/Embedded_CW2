@@ -5,11 +5,11 @@
 #include <ES_CAN.h>
 #include "knobs.h"
 
-#define sender 0
-//#define reciever 0
+ #define sender 0
+// #define reciever 0
 
 //#define DISABLE_THREADS
-//#define TEST_SCAN_KEYS
+// #define TEST_SCAN_KEYS
 //#define TEST_DISPLAY_UPDATE
 
 //Constants
@@ -209,27 +209,59 @@ void scanKeysTask(void * pvParameters) {
         Knob2.UpdateRotateVal(currentBA_2);
         localknob3rotation = Knob3.CurRotVal();
         localknob2rotation = Knob2.CurRotVal();
-
-        uint16_t onehot = fullkeys^0xFFF; //00001111 invert last 4 bits
-        uint16_t difference = onehot^prevfullkeys;
-        if(difference){
-          uint8_t idx_array[12] = {12,12,12,12,12,12,12,12,12,12,12,12};
-          uint8_t c = 0;
-          while(difference){
-            uint8_t idx = __builtin_ctz(difference);
-            idx_array[c] = (idx);
-            difference &= ~(1<<idx);
-            c++;
+        //Starting new approach 
+        uint16_t onehot = fullkeys^0xFFF;
+        uint16_t prevfullkeysCopy = prevfullkeys;
+        uint16_t onehotCopy = onehot;
+        uint8_t p_idx_array[12] = {12,12,12,12,12,12,12,12,12,12,12,12};
+        uint8_t r_idx_array[12] = {12,12,12,12,12,12,12,12,12,12,12,12};
+        uint8_t cur_idx;
+        uint8_t prev_idx;
+        uint8_t p_count = 0;
+        uint8_t r_count = 0;
+        bool pressed =  false;
+        bool received = false;
+        while (onehotCopy | prevfullkeysCopy){
+          if  (onehotCopy == 0){
+            cur_idx = 12;
+             prev_idx = __builtin_ctz(prevfullkeysCopy);
           }
-          if(onehot>prevfullkeys){ //current is bigger than previous key is pressed
-            localnote = notes[idx_array[0]];
-            localsharp = sharps[idx_array[0]];
-            #ifdef sender
+          else if (prevfullkeysCopy == 0){
+            prev_idx = 12;
+            cur_idx = __builtin_ctz(onehotCopy);
+          }
+          else{
+            cur_idx = __builtin_ctz(onehotCopy);
+            prev_idx = __builtin_ctz(prevfullkeysCopy);
+          }
+
+          if (prev_idx==cur_idx){
+            onehotCopy &= ~(1<<cur_idx);
+            prevfullkeysCopy &= ~(1<<cur_idx);
+          }
+          else if (prev_idx>cur_idx){
+            pressed = true;
+            p_idx_array[p_count] = cur_idx;
+            onehotCopy &= ~(1<<cur_idx);
+            p_count++;
+          }
+          else{
+            received = true;
+            r_idx_array[r_count] = prev_idx;
+            prevfullkeysCopy &= ~(1<<prev_idx);
+            r_count++;
+          }
+
+        }
+        if (pressed){
+          localnote = notes[p_idx_array[0]];
+          localsharp = sharps[p_idx_array[0]];
+          #ifdef sender
             for (uint8_t i = 0; i < 12; i++){
-              if (idx_array[i] != 12) {
+              if (p_idx_array[i] != 12) {
                 TX_Message[0] = 'P';
                 TX_Message[1] = localknob2rotation;
-                TX_Message[2] = idx_array[i];
+                TX_Message[2] = p_idx_array[i];
                 TX_Message[3] = sender;    
                 xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
               }
@@ -238,45 +270,44 @@ void scanKeysTask(void * pvParameters) {
               }
             }
             #endif
-
-            #ifdef reciever
+          #ifdef reciever
             int8_t shift = localknob2rotation-4;
             xSemaphoreTake(localrangekeyarrayMutex, portMAX_DELAY);
             for (uint8_t i = 0; i < 12; i++){
-              if (idx_array[i] != 12) {
+              if (p_idx_array[i] != 12) {
                 if(shift > 0){
-                  localstepsize = stepSizes[idx_array[i]]<<shift;
+                  localstepsize = stepSizes[p_idx_array[i]]<<shift;
                 }
                 else{
-                  localstepsize = stepSizes[idx_array[i]]>>-shift;
+                  localstepsize = stepSizes[p_idx_array[i]]>>-shift;
                 }
-                Serial.print("localstepsize: ");
-                Serial.println(localstepsize);
-                localrangekeyarray[idx_array[i]] = localstepsize;
+                // Serial.print("localstepsize: ");
+                // Serial.println(localstepsize);
+                localrangekeyarray[p_idx_array[i]] = localstepsize;
               }
               else{
                 break;
               }
             }
             xSemaphoreGive(localrangekeyarrayMutex);
-            #endif
-          }
-          else{
-            if(!onehot){ //if no keys are pressed
+          #endif
+        }
+        if (received){
+          if(!onehot){ //if no keys are pressed
                 localnote = ' ';
                 localsharp = ' ';
               }
-            else{
+            else if (!pressed){
               uint8_t curr_idx = __builtin_ctz(onehot);
               localnote = notes[curr_idx];
               localsharp = sharps[curr_idx];
             }
             #ifdef sender
               for (uint8_t i = 0; i < 12; i++){
-                if (idx_array[i] != 12) {
+                if (r_idx_array[i] != 12) {
                   TX_Message[0] = 'R';
                   TX_Message[1] = localknob2rotation;
-                  TX_Message[2] = idx_array[i];
+                  TX_Message[2] = r_idx_array[i];
                   TX_Message[3] = sender;    
                   xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
                 }
@@ -289,8 +320,8 @@ void scanKeysTask(void * pvParameters) {
             #ifdef reciever
             xSemaphoreTake(localrangekeyarrayMutex, portMAX_DELAY);
             for (uint8_t i = 0; i < 12; i++){
-              if (idx_array[i] != 12) {
-                localrangekeyarray[idx_array[i]] = 0;
+              if (r_idx_array[i] != 12) {
+                localrangekeyarray[r_idx_array[i]] = 0;
               }
               else{
                 break;
@@ -298,9 +329,99 @@ void scanKeysTask(void * pvParameters) {
             }
             xSemaphoreGive(localrangekeyarrayMutex);
             #endif
-          }
         }
         prevfullkeys = onehot;
+        // uint16_t onehot = fullkeys^0xFFF; //00001111 invert last 4 bits
+        // uint16_t difference = onehot^prevfullkeys;
+        // if(difference){
+        //   uint8_t idx_array[12] = {12,12,12,12,12,12,12,12,12,12,12,12};
+        //   uint8_t c = 0;
+        //   while(difference){
+        //     uint8_t idx = __builtin_ctz(difference);
+        //     idx_array[c] = (idx);
+        //     difference &= ~(1<<idx);
+        //     c++;
+        //   }
+        //   if(onehot>prevfullkeys){ //current is bigger than previous key is pressed
+        //     localnote = notes[idx_array[0]];
+        //     localsharp = sharps[idx_array[0]];
+        //     #ifdef sender
+        //     for (uint8_t i = 0; i < 12; i++){
+        //       if (idx_array[i] != 12) {
+        //         TX_Message[0] = 'P';
+        //         TX_Message[1] = localknob2rotation;
+        //         TX_Message[2] = idx_array[i];
+        //         TX_Message[3] = sender;    
+        //         xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+        //       }
+        //       else{
+        //         break;
+        //       }
+        //     }
+        //     #endif
+
+        //     #ifdef reciever
+        //     int8_t shift = localknob2rotation-4;
+        //     xSemaphoreTake(localrangekeyarrayMutex, portMAX_DELAY);
+        //     for (uint8_t i = 0; i < 12; i++){
+        //       if (idx_array[i] != 12) {
+        //         if(shift > 0){
+        //           localstepsize = stepSizes[idx_array[i]]<<shift;
+        //         }
+        //         else{
+        //           localstepsize = stepSizes[idx_array[i]]>>-shift;
+        //         }
+        //         Serial.print("localstepsize: ");
+        //         Serial.println(localstepsize);
+        //         localrangekeyarray[idx_array[i]] = localstepsize;
+        //       }
+        //       else{
+        //         break;
+        //       }
+        //     }
+        //     xSemaphoreGive(localrangekeyarrayMutex);
+        //     #endif
+        //   }
+        //   else{
+        //     if(!onehot){ //if no keys are pressed
+        //         localnote = ' ';
+        //         localsharp = ' ';
+        //       }
+        //     else{
+        //       uint8_t curr_idx = __builtin_ctz(onehot);
+        //       localnote = notes[curr_idx];
+        //       localsharp = sharps[curr_idx];
+        //     }
+        //     #ifdef sender
+        //       for (uint8_t i = 0; i < 12; i++){
+        //         if (idx_array[i] != 12) {
+        //           TX_Message[0] = 'R';
+        //           TX_Message[1] = localknob2rotation;
+        //           TX_Message[2] = idx_array[i];
+        //           TX_Message[3] = sender;    
+        //           xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+        //         }
+        //         else{
+        //           break;
+        //         }
+        //       }
+        //     #endif
+            
+        //     #ifdef reciever
+        //     xSemaphoreTake(localrangekeyarrayMutex, portMAX_DELAY);
+        //     for (uint8_t i = 0; i < 12; i++){
+        //       if (idx_array[i] != 12) {
+        //         localrangekeyarray[idx_array[i]] = 0;
+        //       }
+        //       else{
+        //         break;
+        //       }
+        //     }
+        //     xSemaphoreGive(localrangekeyarrayMutex);
+        //     #endif
+        //   }
+        // }
+        // prevfullkeys = onehot;
         // for (uint8_t i = 0; i < 4; i++){
         //   setRow(i);
         //   delayMicroseconds(3);

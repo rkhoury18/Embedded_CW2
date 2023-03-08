@@ -5,7 +5,7 @@
 #include <ES_CAN.h>
 #include "knobs.h"
 
-//  #define sender 0
+// #define sender 0
 #define reciever 0
 
 //#define DISABLE_THREADS
@@ -20,19 +20,32 @@
 //global variables  
   //volatile uint32_t currentStepSize;
   //volatile uint32_t mastercurrentStepSize;
+  #ifdef reciever
   volatile char currentnote;
   volatile char currentsharp;
   volatile uint8_t knob3rotation = 4;
   volatile uint8_t knob2rotation = 4;
-  volatile uint8_t keyArray[7];
   volatile uint32_t localrangekeyarray[12] = {0};
   volatile uint32_t fullrangekeyarray[24] = {0};
   SemaphoreHandle_t localrangekeyarrayMutex;
-  SemaphoreHandle_t keyArrayMutex;
+  SemaphoreHandle_t fullrangekeyarrayMutex;
+  volatile static uint8_t module_id = 0;
+  #endif
+  
+  uint8_t RX_Message[8]={0};
   SemaphoreHandle_t CAN_TX_Semaphore;
   QueueHandle_t msgInQ;
   QueueHandle_t msgOutQ;
-  uint8_t RX_Message[8]={0};
+
+  #ifdef sender
+  volatile uint8_t octave;
+  volatile uint8_t volume;
+  volatile uint8_t sender_id;
+  #endif
+
+  volatile uint8_t keyArray[7];
+  SemaphoreHandle_t keyArrayMutex;
+
 //Pin definitions
   //Row select and enable
   const int RA0_PIN = D3;
@@ -93,6 +106,7 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
       digitalWrite(REN_PIN,LOW);
 }
 
+#ifdef reciever
 void sampleISR() {
   static uint32_t phaseAcc[36] = {0};
   int32_t polyphony_vout = 0;
@@ -115,19 +129,20 @@ void sampleISR() {
   analogWrite(OUTR_PIN, polyphony_vout + 128);
 }
 
-#ifdef reciever
-void CAN_RX_ISR (void) {
-	uint8_t RX_Message_ISR[8];
-	uint32_t ID;
-	CAN_RX(ID, RX_Message_ISR);
-	xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
-}
-
 void decodeTask(void * pvParameters){
   uint32_t recievestep;
   while(1){
     xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
-    if (RX_Message[0] == 'R'){
+    if (RX_Message[0] == 'H'){
+      uint8_t t_module_id = module_id;
+      uint8_t octave = knob2rotation + t_module_id+1;
+      uint8_t TX_Message[8] = {'M', module_id, octave, 0, 0, 0, 0, 0};
+      xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+      t_module_id++;
+    __atomic_store_n(&module_id, t_module_id, __ATOMIC_RELAXED);
+      Serial.println("Handshake");
+    }
+    else if (RX_Message[0] == 'R'){
       recievestep = 0;
     }
     else{
@@ -139,12 +154,20 @@ void decodeTask(void * pvParameters){
         recievestep = stepSizes[RX_Message[2]]>>-shift;
       }
     }
+    xSemaphoreTake(fullrangekeyarrayMutex, portMAX_DELAY);
     fullrangekeyarray[(12*RX_Message[3])+RX_Message[2]] = recievestep;//write step size for keys recoeved from sending keyboards
+    xSemaphoreGive(fullrangekeyarrayMutex);
   }
 }
 #endif
 
-#ifdef sender
+void CAN_RX_ISR (void) {
+	uint8_t RX_Message_ISR[8];
+	uint32_t ID;
+	CAN_RX(ID, RX_Message_ISR);
+	xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
+}
+
 void CAN_TX_ISR (void) {
 	xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
 }
@@ -157,6 +180,25 @@ void CAN_TX_Task (void * pvParameters) {
 		CAN_TX(0x123, msgOut);
 	}
 }
+
+#ifdef sender
+void decodeTask(void * pvParameters){
+  uint32_t recievestep;
+  while(1){
+    xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+    if (RX_Message[0] == 'M'){
+      sender_id = RX_Message[1];
+      octave = RX_Message[2];
+      // Serial.printf("id is %d, octave is %d\n", sender_id, octave);
+    }
+    else if (RX_Message[0] == 'K'){
+      octave = RX_Message[2] + 1;
+      volume = RX_Message[3];
+      // Serial.printf("octave is %d, volume is %d\n", octave, volume);
+    }
+  }
+}
+
 #endif
 
 
@@ -172,11 +214,14 @@ void scanKeysTask(void * pvParameters) {
     uint8_t TX_Message[8] = {0};
     while(1){
         vTaskDelayUntil( &xLastWakeTime, xFrequency );
+        #ifdef reciever
         uint32_t localstepsize = 0;
         char localnote = currentnote;
         char localsharp = currentsharp;
         uint8_t localknob3rotation = knob3rotation;
         uint8_t localknob2rotation = knob2rotation;
+        #endif
+        
         uint8_t localkeyArray[7] = {0};
         for (uint8_t i = 0; i < 4; i++){
           setRow(i);
@@ -184,17 +229,27 @@ void scanKeysTask(void * pvParameters) {
           uint8_t val = readCols();
           localkeyArray[i] = val;
         }
+
         xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
           memcpy((void*)keyArray, localkeyArray, sizeof(localkeyArray));
         xSemaphoreGive(keyArrayMutex);
         fullkeys = localkeyArray[0] | (localkeyArray[1]<<4) | (localkeyArray[2]<<8);
 
+        #ifdef reciever
         uint8_t currentBA_3 = localkeyArray[3] & 0x03; //00000011 select last 2 bits
         uint8_t currentBA_2 = (localkeyArray[3] & 0x0C)>>2; //000011 select last 2 bits
         Knob3.UpdateRotateVal(currentBA_3);
         Knob2.UpdateRotateVal(currentBA_2);
         localknob3rotation = Knob3.CurRotVal();
         localknob2rotation = Knob2.CurRotVal();
+        if (module_id){
+          TX_Message[0] = 'K';
+          TX_Message[2] = localknob2rotation;
+          TX_Message[3] = localknob3rotation;
+          xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+        }
+        #endif
+
         //Starting new approach 
         uint16_t onehot = fullkeys^0xFFF;
         uint16_t prevfullkeysCopy = prevfullkeys;
@@ -206,7 +261,7 @@ void scanKeysTask(void * pvParameters) {
         uint8_t p_count = 0;
         uint8_t r_count = 0;
         bool pressed =  false;
-        bool received = false;
+        bool released = false;
         while (onehotCopy | prevfullkeysCopy){
           if  (onehotCopy == 0){
             cur_idx = 12;
@@ -232,7 +287,7 @@ void scanKeysTask(void * pvParameters) {
             p_count++;
           }
           else{
-            received = true;
+            released = true;
             r_idx_array[r_count] = prev_idx;
             prevfullkeysCopy &= ~(1<<prev_idx);
             r_count++;
@@ -240,22 +295,26 @@ void scanKeysTask(void * pvParameters) {
 
         }
         if (pressed){
+          #ifdef reciever
           localnote = notes[p_idx_array[0]];
           localsharp = sharps[p_idx_array[0]];
+          #endif
+
           #ifdef sender
             for (uint8_t i = 0; i < 12; i++){
               if (p_idx_array[i] != 12) {
                 TX_Message[0] = 'P';
-                TX_Message[1] = localknob2rotation;
+                TX_Message[1] = octave;
                 TX_Message[2] = p_idx_array[i];
-                TX_Message[3] = sender;    
+                TX_Message[3] = sender_id;    
                 xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
               }
               else{
                 break;
               }
             }
-            #endif
+          #endif
+
           #ifdef reciever
             int8_t shift = localknob2rotation-4;
             xSemaphoreTake(localrangekeyarrayMutex, portMAX_DELAY);
@@ -278,23 +337,25 @@ void scanKeysTask(void * pvParameters) {
             xSemaphoreGive(localrangekeyarrayMutex);
           #endif
         }
-        if (received){
-          if(!onehot){ //if no keys are pressed
-                localnote = ' ';
-                localsharp = ' ';
-              }
+        if (released){
+          #ifdef reciever
+            if(!onehot){ //if no keys are pressed
+              localnote = ' ';
+              localsharp = ' ';
+            }
             else if (!pressed){
               uint8_t curr_idx = __builtin_ctz(onehot);
               localnote = notes[curr_idx];
               localsharp = sharps[curr_idx];
             }
+            #endif
             #ifdef sender
               for (uint8_t i = 0; i < 12; i++){
                 if (r_idx_array[i] != 12) {
                   TX_Message[0] = 'R';
-                  TX_Message[1] = localknob2rotation;
+                  TX_Message[1] = octave;
                   TX_Message[2] = r_idx_array[i];
-                  TX_Message[3] = sender;    
+                  TX_Message[3] = sender_id;    
                   xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
                 }
                 else{
@@ -317,11 +378,12 @@ void scanKeysTask(void * pvParameters) {
             #endif
         }
         prevfullkeys = onehot;
-        
+    #ifdef reciever    
     __atomic_store_n(&currentnote, localnote, __ATOMIC_RELAXED);
     __atomic_store_n(&currentsharp, localsharp, __ATOMIC_RELAXED);
     __atomic_store_n(&knob3rotation, localknob3rotation, __ATOMIC_RELAXED);
     __atomic_store_n(&knob2rotation, localknob2rotation, __ATOMIC_RELAXED);
+    #endif
     }
   #else
     uint8_t localprevkey = -1;
@@ -405,6 +467,8 @@ void displayUpdateTask(void * pvParameters){
     u8g2.print(keyArray[1],HEX);
     u8g2.print(keyArray[2],HEX);
     xSemaphoreGive(keyArrayMutex);
+    
+    #ifdef reciever
     u8g2.setCursor(2,20);
     u8g2.print(knob3rotation,DEC);
     u8g2.setCursor(10,20);
@@ -412,11 +476,18 @@ void displayUpdateTask(void * pvParameters){
     u8g2.setCursor(2,30);
     u8g2.print(currentnote);
     u8g2.print(currentsharp);
+    #endif
 
-    u8g2.setCursor(66,30);
-    u8g2.print((char) RX_Message[0]);
-    u8g2.print(RX_Message[1]);
-    u8g2.print(RX_Message[2]);
+    #ifdef sender
+    u8g2.setCursor(2,20);
+    u8g2.print(sender_id,DEC);
+    u8g2.setCursor(2,30);
+    u8g2.print(octave);
+    #endif
+    // u8g2.setCursor(66,30);
+    // u8g2.print((char) RX_Message[0]);
+    // u8g2.print(RX_Message[1]);
+    // u8g2.print(RX_Message[2]);
 
     u8g2.sendBuffer();          
     //Toggle LED
@@ -452,29 +523,16 @@ void displayUpdateTask(void * pvParameters){
   #endif
 }
 
-uint8_t one_hot_decode(uint8_t onehot){
-  uint8_t count = 0;
-  for(count; count<4;count++){
-    if (onehot == 1){
-      break;
-    }
-    else {
-      onehot>>=1;
-    }
-  }
-  return count;
-}
-
 void setup() {
   // put your setup code here, to run once:
-  TIM_TypeDef *Instance = TIM1;
-  HardwareTimer *sampleTimer = new HardwareTimer(Instance);
-  msgInQ = xQueueCreate(36,8);
+    msgInQ = xQueueCreate(36,8);
+ 
   #ifndef TEST_SCAN_KEYS
     msgOutQ = xQueueCreate(36,8);
   #else
     msgOutQ = xQueueCreate(384,8);
   #endif
+
 
   #ifndef DISABLE_THREADS
     TaskHandle_t scanKeysHandle = NULL;
@@ -495,18 +553,15 @@ void setup() {
     1,			/* Task priority */
     &displayUpdateTaskHandle );
     
-    #ifdef reciever
     TaskHandle_t decodeTaskHandle = NULL;
     xTaskCreate(
     decodeTask,		/* Function that implements the task */
     "decode",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    3,			/* Task priority */
+    4,			/* Task priority */
     &decodeTaskHandle);
-    #endif
 
-    #ifdef sender
     TaskHandle_t CAN_TX_TaskHandle = NULL;
     xTaskCreate(
     CAN_TX_Task,		/* Function that implements the task */
@@ -515,7 +570,6 @@ void setup() {
     NULL,			/* Parameter passed into the task */
     3,			/* Task priority */
     &CAN_TX_TaskHandle);
-    #endif
   #endif
 
   #ifdef TEST_SCAN_KEYS
@@ -562,30 +616,37 @@ void setup() {
     &CAN_TX_TaskHandle);
   #endif
 
+  #ifdef reciever
   localrangekeyarrayMutex = xSemaphoreCreateMutex();
-  keyArrayMutex = xSemaphoreCreateMutex();
-  CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
-  
-  sampleTimer->setOverflow(22000, HERTZ_FORMAT);
-  #ifndef DISABLE_THREADS
-    sampleTimer->attachInterrupt(sampleISR);
-  #endif
-  sampleTimer->resume();
-  
-  CAN_Init(false);
-  #ifndef DISABLE_THREADS
-    #ifdef reciever
-    CAN_RegisterRX_ISR(CAN_RX_ISR);
-    #endif
+  fullrangekeyarrayMutex = xSemaphoreCreateMutex();
   #endif
 
-  #ifndef DISABLE_THREADS
-    #ifdef sender
-    CAN_RegisterTX_ISR(CAN_TX_ISR);
+  keyArrayMutex = xSemaphoreCreateMutex();
+  CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
+
+  #ifdef reciever
+    TIM_TypeDef *Instance = TIM1;
+    HardwareTimer *sampleTimer = new HardwareTimer(Instance);
+    sampleTimer->setOverflow(22000, HERTZ_FORMAT);
+    #ifndef DISABLE_THREADS
+      sampleTimer->attachInterrupt(sampleISR);
     #endif
+    sampleTimer->resume();
+  #endif
+
+  CAN_Init(false);
+  #ifndef DISABLE_THREADS
+    CAN_RegisterRX_ISR(CAN_RX_ISR);
+    CAN_RegisterTX_ISR(CAN_TX_ISR);
   #endif
   setCANFilter(0x123,0x7ff);
   CAN_Start();
+
+  #ifdef sender
+  uint8_t TX_Message[8] = {'H','e','l','l','o',0,0,0};
+  xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+  #endif
+
   //Set pin directions
   pinMode(RA0_PIN, OUTPUT);
   pinMode(RA1_PIN, OUTPUT);

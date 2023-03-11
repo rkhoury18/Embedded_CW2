@@ -28,8 +28,8 @@
   volatile uint32_t fullrangekeyarray[36] = {0};
   SemaphoreHandle_t fullrangekeyarrayMutex;
 
-  volatile uint8_t west_detect;
-  volatile uint8_t east_detect;
+  volatile uint8_t west_detect = 10;
+  volatile uint8_t east_detect = 10;
   //#endif
   
   volatile uint8_t pos;
@@ -129,6 +129,14 @@ void auto_detect(bool west, bool east){
   else{
     sender = true; //either east or middle 2/3 modules
     reciever = false;
+    singleton = false;
+  //   while(RX_Message[0] != 'H'){
+  //     xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+  //   }
+  //   pos = RX_Message[1] + 1;
+  //   if(east){
+  //     uint8_t TX_Message[8] = {'H',pos, 0, 0, 0, 0, 0};
+  //   }
   }
 }
 
@@ -152,12 +160,12 @@ void sampleISR() {
 }
 
 void recieverTask(){
-  uint32_t recievestep;
-  xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+  uint32_t recievestep = 0;
+  Serial.printf("Recieved: %c %d %d %d\n", RX_Message[0], RX_Message[1], RX_Message[2], RX_Message[3]);
   if (RX_Message[0] == 'R'){
     recievestep = 0;
   }
-  else{
+  else if (RX_Message[0] == 'P'){
     int8_t shift = RX_Message[1]-4;
     if(shift > 0){
       recievestep = stepSizes[RX_Message[2]]<<shift;
@@ -172,28 +180,28 @@ void recieverTask(){
 }
 
 void senderTask(){
-  xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
   if (RX_Message[0] == 'H'){
     pos = RX_Message[1] + 1;
-    Serial.printf("id is %d, pos is %d\n", RX_Message[1], pos);
+    //Serial.printf("id is %d, pos is %d\n", RX_Message[1], pos);
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
       uint8_t west_detect = ((keyArray[5]&0x08)>>3)^0x01;
       uint8_t east_detect = ((keyArray[6]&0x08)>>3)^0x01;
     xSemaphoreGive(keyArrayMutex);
     if(east_detect){
-      uint8_t TX_Message[8] = {'H',pos, 0, 0, 0, 0, 0};
+      uint8_t TX_Message[8] = {'H',pos, 0, 0, 0, 0, 0, 0};
     }
     // Serial.printf("id is %d, octave is %d\n", sender_id, octave);
   }
-  if (RX_Message[0] == 'K'){
+  else if (RX_Message[0] == 'K'){
     octave = RX_Message[2] + pos;
     volume = RX_Message[3];
-    // Serial.printf("octave is %d, volume is %d\n", octave, volume);
+    //Serial.printf("octave is %d, volume is %d\n", octave, volume);
   }
 }
 
 void decodeTask(void * pvParameters){
   while(1){
+  xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
     if(reciever){
       recieverTask();
     }
@@ -242,6 +250,8 @@ void scanKeysTask(void * pvParameters) {
     uint16_t prevfullkeys = 0;
     uint16_t fullkeys = 0;
     uint8_t TX_Message[8] = {0};
+    uint32_t reset[36] = {0};
+
     while(1){
         vTaskDelayUntil( &xLastWakeTime, xFrequency );
         //#ifdef reciever
@@ -265,20 +275,28 @@ void scanKeysTask(void * pvParameters) {
         xSemaphoreGive(keyArrayMutex);
 
         fullkeys = localkeyArray[0] | (localkeyArray[1]<<4) | (localkeyArray[2]<<8);
-        uint8_t localwest_detect = ((keyArray[5]&0x08)>>3)^0x01;
-        uint8_t localeast_detect = ((keyArray[6]&0x08)>>3)^0x01;
-        uint8_t reset[36] = {0};
+        uint8_t localwest_detect = ((localkeyArray[5]&0x08)>>3)^0x01;
+        uint8_t localeast_detect = ((localkeyArray[6]&0x08)>>3)^0x01;
+        //Serial.printf("west_detect is %d, east_detect is %d\n", localwest_detect, localeast_detect);
         if (localwest_detect != west_detect){ //west detect has changed
+        if(reciever){
           xSemaphoreTake(fullrangekeyarrayMutex, portMAX_DELAY);
-            memcpy((void*)fullrangekeyarray, reset, sizeof(reset));
+            for (uint8_t i = 0; i < 36; i++){
+              fullrangekeyarray[i] = 0;
+            }
           xSemaphoreGive(fullrangekeyarrayMutex);
+        }
           auto_detect(localwest_detect, localeast_detect);
           __atomic_store_n(&west_detect, localwest_detect, __ATOMIC_RELAXED);
         }
         if (localeast_detect != east_detect){ //east detect has changed
+        if(reciever){
           xSemaphoreTake(fullrangekeyarrayMutex, portMAX_DELAY);
-            memcpy((void*)fullrangekeyarray, reset, sizeof(reset));
+            for (uint8_t i = 0; i < 36; i++){
+              fullrangekeyarray[i] = 0;
+            }
           xSemaphoreGive(fullrangekeyarrayMutex);
+        }
           auto_detect(localwest_detect, localeast_detect);
           __atomic_store_n(&east_detect, localeast_detect, __ATOMIC_RELAXED);
         }
@@ -374,7 +392,8 @@ void scanKeysTask(void * pvParameters) {
                 TX_Message[0] = 'P';
                 TX_Message[1] = octave;
                 TX_Message[2] = p_idx_array[i];
-                TX_Message[3] = pos;    
+                TX_Message[3] = pos;
+                //Serial.printf("TX_Message: %c %d %d %d\n", TX_Message[0], TX_Message[1], TX_Message[2], TX_Message[3]);    
                 xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
               }
               else{
@@ -413,6 +432,7 @@ void scanKeysTask(void * pvParameters) {
                   TX_Message[1] = octave;
                   TX_Message[2] = r_idx_array[i];
                   TX_Message[3] = pos;    
+                //Serial.printf("TX_Message: %c %d %d %d\n", TX_Message[0], TX_Message[1], TX_Message[2], TX_Message[3]);    
                   xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
                 }
                 else{
@@ -522,12 +542,16 @@ void displayUpdateTask(void * pvParameters){
       u8g2.setCursor(2,30);
       u8g2.print(currentnote);
       u8g2.print(currentsharp);
+      u8g2.setCursor(70,10);
+      u8g2.print('R');
     }
     //#endif
 
     if (sender){
       u8g2.setCursor(2,30);
       u8g2.print(octave);
+      u8g2.setCursor(70,10);
+      u8g2.print('S');
     }
     // u8g2.setCursor(66,30);
     // u8g2.print((char) RX_Message[0]);
@@ -604,7 +628,7 @@ void setup() {
     "decode",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    4,			/* Task priority */
+    2,			/* Task priority */
     &decodeTaskHandle);
 
     TaskHandle_t CAN_TX_TaskHandle = NULL;
@@ -737,6 +761,7 @@ void setup() {
   delayMicroseconds(100);
 
   for (uint8_t i=5; i<7; i++) {
+    setRow(i);
     digitalWrite(REN_PIN,1);          //Enable selected row
     delayMicroseconds(3);             //Wait for column inputs to stabilise
     keyArray[i] = readCols();         //Read column inputs
@@ -745,26 +770,8 @@ void setup() {
 
   west_detect = ((keyArray[5]&0x08)>>3)^0x01;
   east_detect = ((keyArray[6]&0x08)>>3)^0x01;
-
   auto_detect(west_detect,east_detect);
 
-  if(sender){
-    uint32_t ID;
-    while(RX_Message[0] != 'H'){
-      CAN_RX(ID, RX_Message);
-    }
-    pos = RX_Message[1] + 1;
-    xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-      uint8_t west_detect = ((keyArray[5]&0x08)>>3)^0x01;
-      uint8_t east_detect = ((keyArray[6]&0x08)>>3)^0x01;
-    xSemaphoreGive(keyArrayMutex);
-    if(east_detect){
-      uint8_t TX_Message[8] = {'H',pos, 0, 0, 0, 0, 0};
-    }
-    // Serial.printf("id is %d, octave is %d\n", sender_id, octave);
-  }
-
-  
   if(reciever){
     Serial.println("Reciever");
   }
@@ -777,6 +784,10 @@ void setup() {
   //Initialise UART
   Serial.begin(9600);
   Serial.println("Hello World");
+  Serial.print("init west_detect: ");
+  Serial.println(west_detect);
+  Serial.print("init east_detect: ");
+  Serial.println(east_detect);
 
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);

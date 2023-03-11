@@ -505,29 +505,67 @@ void displayUpdateTask(void * pvParameters){
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
     u8g2.clearBuffer();         // clear the internal memory
     u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
-    u8g2.setCursor(2,10);
-    xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-    u8g2.print(keyArray[0],HEX);
-    u8g2.print(keyArray[1],HEX);
-    u8g2.print(keyArray[2],HEX);
-    xSemaphoreGive(keyArrayMutex);
-    u8g2.setCursor(60,10);
-    u8g2.print(pos,DEC);
+    // u8g2.setCursor(2,10);
+    // xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+    // u8g2.print(keyArray[0],HEX);
+    // u8g2.print(keyArray[1],HEX);
+    // u8g2.print(keyArray[2],HEX);
+    // xSemaphoreGive(keyArrayMutex);
+    // u8g2.setCursor(60,10);
+    // u8g2.print(pos,DEC);
     
     if (reciever){
-      u8g2.setCursor(2,20);
-      u8g2.print(volume_knob3,DEC);
-      u8g2.setCursor(10,20);
-      u8g2.print(octave_knob2,DEC);
-      u8g2.setCursor(2,30);
+      u8g2.drawStr(2, 20,"Volume (knob4):");
+      u8g2.drawStr(2, 30,"Octave (knob3):");
+      u8g2.drawStr(2, 10,"Note:");
+      u8g2.setCursor(35,10);
       u8g2.print(currentnote);
       u8g2.print(currentsharp);
+      u8g2.setCursor(97,20);
+      if (volume_knob3==8){
+        u8g2.drawStr(105, 20,"max");
+      }
+      else if (volume_knob3==0){
+          u8g2.drawStr(105, 20,"min");
+      }
+      u8g2.print(volume_knob3,DEC);
+      u8g2.setCursor(88,30);
+      if (octave_knob2==8){
+        u8g2.drawStr(96, 30,"max");
+      }
+      else if (octave_knob2==0){
+          u8g2.drawStr(96, 30,"min");
+      }
+      u8g2.print(octave_knob2,DEC);
+      // u8g2.setCursor(2,30);
+      // u8g2.print(currentnote);
+      // u8g2.print(currentsharp);
     }
     //#endif
 
     if (sender){
-      u8g2.setCursor(2,30);
-      u8g2.print(octave);
+      u8g2.drawStr(2, 20,"Volume:");
+      u8g2.drawStr(2, 30,"Octave:");
+      u8g2.drawStr(2, 10,"Note:");
+      u8g2.setCursor(35,10);
+      u8g2.print(currentnote);
+      u8g2.print(currentsharp);
+      u8g2.setCursor(52,20);
+      if (volume_knob3==8){
+        u8g2.drawStr(60, 20,"max");
+      }
+      else if (volume_knob3==0){
+          u8g2.drawStr(60, 20,"min");
+      }
+      u8g2.print(volume_knob3,DEC);
+      u8g2.setCursor(43,30);
+      if (octave==8){
+        u8g2.drawStr(51, 30,"max");
+      }
+      else if (octave==0){
+          u8g2.drawStr(51, 30,"min");
+      }
+      u8g2.print(octave,DEC);
     }
     // u8g2.setCursor(66,30);
     // u8g2.print((char) RX_Message[0]);

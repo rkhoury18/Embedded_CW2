@@ -4,6 +4,8 @@
 #include "knobs.h"
 #include <ES_CAN.h>
 
+#define sender
+#define receiver
 
 
 //Constants
@@ -45,11 +47,12 @@
   volatile uint8_t keyArray[7];
   SemaphoreHandle_t keyArrayMutex;
   SemaphoreHandle_t RXMessageMutex;
-  int8_t knob3Rotation;     
+  int8_t knob3Rotation;
+  int8_t knob2Rotation;     
   QueueHandle_t msgInQ;
   QueueHandle_t msgOutQ;
   volatile uint8_t RX_Message[8]={0};   
-  SemaphoreHandle_t CAN_TX_Semaphore;       
+  SemaphoreHandle_t CAN_TX_Semaphore;     
 
 
 #ifdef receiver
@@ -116,23 +119,15 @@ int getIndex() {
   return index;
 }
 
-int getIncrement(uint8_t input){
-  switch (input)
-  {
-    case 0x01: return 1;
-    case 0x04: return -1;
-    case 0x0B : return -1;
-    case 0x0E : return 1;
-    case 0x0C : return 1;
-    default: return 0;
-  }
-}
-
 void scanKeysTask(void *pvParameters) {
   const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
   int8_t knob3RotationLocal = 0;
+  int8_t knob2RotationLocal = 0;
   Knob Knob3(0,0,8);
+  Knob Knob2(0,0,8);
+  Knob3.SetLimits(0,8);
+  Knob2.SetLimits(0,8);
   int curIndex = 0;
   int prevIndex = 0;
   uint8_t TX_Message[8] = {0};
@@ -147,13 +142,15 @@ void scanKeysTask(void *pvParameters) {
       }
       uint32_t localCurrentStepSize = 0;
       Knob3.UpdateRotateVal(keyArray[3] & 0x03);
-      Knob3.SetLimits(0,8);
+      Knob2.UpdateRotateVal((keyArray[3] & 0x0C)>>2);
+
       knob3RotationLocal =Knob3.CurRotVal();
+      knob2RotationLocal =Knob2.CurRotVal();
       if (keyArray[0]==15 && keyArray[1]==15 && keyArray[2]==15){
         curIndex = 12;
         if (prevIndex != curIndex){
           TX_Message[0]='R';
-          TX_Message[1]= 4;
+          TX_Message[1]= knob2RotationLocal;
           TX_Message[2]= prevIndex;
         }
       }
@@ -162,7 +159,7 @@ void scanKeysTask(void *pvParameters) {
         localCurrentStepSize = stepSizes[curIndex];
         if (prevIndex != curIndex){
           TX_Message[0]='P';
-          TX_Message[1]= 4;
+          TX_Message[1]= knob2RotationLocal;
           TX_Message[2]= curIndex;
         }
       }
@@ -170,6 +167,7 @@ void scanKeysTask(void *pvParameters) {
       prevIndex = curIndex;
       xSemaphoreGive(keyArrayMutex);
       __atomic_store_n(&knob3Rotation, knob3RotationLocal, __ATOMIC_RELAXED);
+      __atomic_store_n(&knob2Rotation, knob2RotationLocal, __ATOMIC_RELAXED);
       __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
 
   }
@@ -193,6 +191,8 @@ void displayUpdateTask(void *pvParameters){
     u8g2.print(keyArray[2],HEX);
     u8g2.setCursor(20,30);
     u8g2.print(knob3Rotation,HEX);
+    u8g2.setCursor(40,30);
+    u8g2.print(knob2Rotation,HEX);
     xSemaphoreGive(keyArrayMutex);
     u8g2.setCursor(66,30);
     xSemaphoreTake(RXMessageMutex, portMAX_DELAY);
@@ -220,7 +220,8 @@ void displayUpdateTask(void *pvParameters){
         LocalcurrentStepSize=0;
       }
       else {
-        LocalcurrentStepSize =(stepSizes[LocalRX_Message[2]]) << (LocalRX_Message[1]-4);
+        int8_t shift = LocalRX_Message[1]-4;
+        LocalcurrentStepSize =shift<0 ? (stepSizes[LocalRX_Message[2]]) >> -shift :(stepSizes[LocalRX_Message[2]]) << shift;
       }
       xSemaphoreTake(RXMessageMutex, portMAX_DELAY);
         for (int i=0 ; i<8 ; i++){

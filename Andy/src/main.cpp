@@ -3,22 +3,24 @@
 #include <iostream>
 #include <STM32FreeRTOS.h>
 #include <ES_CAN.h>
+#include "knobs.h"
 
 #define sender 0
-#define reciever 0
+//#define reciever 0
 
 //Constants
   const uint32_t interval = 100; //Display update interval
   const uint32_t stepSizes[12] = {50953930, 54077542, 57396381, 60715219, 64229283, 68133799, 72233540, 76528508, 81018701, 85899345, 90975216, 96441538};
   const char notes[12] = {'C','C','D','D','E','F','F','G','G','A','A','B'};
-  const char sharps[12] = {0,'#',0,'#',0,0,'#',0,'#',0,'#',0};
-  const uint8_t octave = 5;
+  const char sharps[12] = {'','#','','#','','','#','','#','','#',''};
 //global variables  
   volatile uint32_t currentStepSize;
   volatile uint32_t mastercurrentStepSize;
   volatile char currentnote;
   volatile char currentsharp;
   volatile uint8_t knob3rotation = 4;
+  volatile uint8_t knob2rotation = 4;
+
   volatile uint8_t keyArray[7];
   SemaphoreHandle_t keyArrayMutex;
   SemaphoreHandle_t CAN_TX_Semaphore;
@@ -115,7 +117,7 @@ void decodeTask(void * pvParameters){
         recievestep = stepSizes[RX_Message[2]]<<shift;
       }
       else{
-        recievestep = stepSizes[RX_Message[2]]>>shift;
+        recievestep = stepSizes[RX_Message[2]]>>-shift;
       }
     }
     localstep = recievestep ? recievestep:mastercurrentStepSize;
@@ -142,8 +144,8 @@ void CAN_TX_Task (void * pvParameters) {
 void scanKeysTask(void * pvParameters) {
   const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  uint8_t previousBA = 0;
-  int8_t prevfunc = 0;
+  Knob Knob3(0,0,8);
+  Knob Knob2(0,0,8);
   uint8_t localprevkey = -1;
   uint8_t TX_Message[8] = {0};
   while(1){
@@ -152,6 +154,7 @@ void scanKeysTask(void * pvParameters) {
       char localnote = 0;
       char localsharp = 0;
       uint8_t localknob3rotation = knob3rotation;
+      uint8_t localknob2rotation = knob2rotation;
       for (uint8_t i = 0; i < 4; i++){
         setRow(i);
         delayMicroseconds(3);
@@ -165,12 +168,12 @@ void scanKeysTask(void * pvParameters) {
             if (onehot & (1<<j)){
               uint8_t idx = 4*i + j;
               //u8g2.print(idx,DEC);
-              int8_t shift = octave - 4;
+              int8_t shift = localknob2rotation - 4;
               if(shift > 0){
                 localstepsize = stepSizes[idx]<<shift;
               }
               else{
-                localstepsize = stepSizes[idx]>>shift;
+                localstepsize = stepSizes[idx]>>-shift;
               }
               localnote = notes[idx];
               localsharp = sharps[idx];
@@ -179,7 +182,8 @@ void scanKeysTask(void * pvParameters) {
           }
         }
         else{
-          uint8_t currentBA = val & 0x03; //00000011 select last 2 bits
+<<<<<<< HEAD
+          uint8_t currezntBA = val & 0x03; //00000011 select last 2 bits
           switch (previousBA){
             case 0: 
               if(currentBA == 1 && localknob3rotation<8){
@@ -219,17 +223,25 @@ void scanKeysTask(void * pvParameters) {
               break;
           }
           previousBA = currentBA;    
+=======
+          uint8_t currentBA_3 = val & 0x03; //00000011 select last 2 bits
+          uint8_t currentBA_2 = (val & 0x0C)>>2; //000011 select last 2 bits
+          Knob3.UpdateRotateVal(currentBA_3);
+          Knob2.UpdateRotateVal(currentBA_2);
+          localknob3rotation = Knob3.CurRotVal();
+          localknob2rotation = Knob2.CurRotVal();  
+>>>>>>> c9419d761ac7d55a920114dc094d2cfd455678c1
         }
       }
-  #ifdef sender
+    #ifdef sender
       if(localnote){
       TX_Message[0] = 'P';
-      TX_Message[1] = octave;
+      TX_Message[1] = localknob2rotation;
       TX_Message[2] = localprevkey;
     }
     else if(localprevkey != 255){
       TX_Message[0] = 'R';
-      TX_Message[1] = octave;
+      TX_Message[1] = localknob2rotation;
       TX_Message[2] = localprevkey;
     }
     xQueueSend( msgOutQ, TX_Message, portMAX_DELAY);
@@ -238,6 +250,7 @@ void scanKeysTask(void * pvParameters) {
   __atomic_store_n(&currentnote, localnote, __ATOMIC_RELAXED);
   __atomic_store_n(&currentsharp, localsharp, __ATOMIC_RELAXED);
   __atomic_store_n(&knob3rotation, localknob3rotation, __ATOMIC_RELAXED);
+  __atomic_store_n(&knob2rotation, localknob2rotation, __ATOMIC_RELAXED);
   }
 }
 
@@ -253,10 +266,11 @@ void displayUpdateTask(void * pvParameters){
       u8g2.print(keyArray[0],HEX);
       u8g2.print(keyArray[1],HEX);
       u8g2.print(keyArray[2],HEX);
-      u8g2.setCursor(2,20);
-      u8g2.print(knob3rotation,DEC);
     xSemaphoreGive(keyArrayMutex);
-    
+    u8g2.setCursor(2,20);
+    u8g2.print(knob3rotation,DEC);
+    u8g2.setCursor(10,20);
+    u8g2.print(knob2rotation,DEC);
     u8g2.setCursor(2,30);
     u8g2.print(currentnote);
     u8g2.print(currentsharp);

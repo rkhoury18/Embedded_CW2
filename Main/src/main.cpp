@@ -524,7 +524,7 @@ void displayUpdateTask(void * pvParameters){
   while(1){
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
     u8g2.clearBuffer();         // clear the internal memory
-    u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
+    u8g2.setFont(u8g2_font_courB08_tr); // choose a suitable font
     // u8g2.setCursor(2,10);
     // xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
     // u8g2.print(keyArray[0],HEX);
@@ -535,63 +535,64 @@ void displayUpdateTask(void * pvParameters){
     // u8g2.print(pos,DEC);
     
     if (reciever){
-      u8g2.drawStr(2, 20,"Volume (knob4):");
-      u8g2.drawStr(2, 30,"Octave (knob3):");
-      u8g2.drawStr(2, 10,"Note:");
-      u8g2.setCursor(35,10);
+      u8g2.drawStr(2, 15,"Vol(K4):");
+      u8g2.drawStr(2, 23,"Oct(K3):");
+      u8g2.drawStr(2, 6,"Note:");
+      u8g2.drawStr(2, 32, "K1");  
+      u8g2.drawStr(39, 32, "K2");
+      u8g2.drawStr(80, 32, "K3");
+      u8g2.drawStr(116, 32, "K4");
+      // u8g2.drawStr(90, 6, "K:Knob");
+      u8g2.setCursor(32,6);
       u8g2.print(currentnote);
       u8g2.print(currentsharp);
-      u8g2.setCursor(97,20);
+      u8g2.setCursor(50,16);
       if (volume_knob3==8){
-        u8g2.drawStr(105, 20,"max");
+        u8g2.drawStr(58, 15,"max");
       }
       else if (volume_knob3==0){
-          u8g2.drawStr(105, 20,"min");
+          u8g2.drawStr(58, 15,"min");
       }
       u8g2.print(volume_knob3,DEC);
-      u8g2.setCursor(88,30);
+      u8g2.setCursor(50,24);
       if (octave_knob2==8){
-        u8g2.drawStr(96, 30,"max");
+        u8g2.drawStr(58, 23,"max");
       }
       else if (octave_knob2==0){
-          u8g2.drawStr(96, 30,"min");
+          u8g2.drawStr(58, 23,"min");
       }
       u8g2.print(octave_knob2,DEC);
       // u8g2.setCursor(2,30);
       // u8g2.print(currentnote);
       // u8g2.print(currentsharp);
-      u8g2.setCursor(70,10);
-      u8g2.print('R');
     }
     //#endif
 
     if (sender){
-      u8g2.drawStr(2, 20,"Volume:");
-      u8g2.drawStr(2, 30,"Octave:");
-      u8g2.drawStr(2, 10,"Note:");
+      u8g2.drawStr(2, 15,"Vol:");
+      u8g2.drawStr(2, 23,"Oct:");
+      u8g2.drawStr(2, 6,"Note:");
       u8g2.setCursor(35,10);
       u8g2.print(currentnote);
       u8g2.print(currentsharp);
-      u8g2.setCursor(52,20);
-      if (volume_knob3==8){
-        u8g2.drawStr(60, 20,"max");
+      u8g2.setCursor(25,16);
+      if (volume==8){
+        u8g2.drawStr(33, 15,"max");
       }
-      else if (volume_knob3==0){
-          u8g2.drawStr(60, 20,"min");
+      else if (volume==0){
+          u8g2.drawStr(33, 15,"min");
       }
-      u8g2.print(volume_knob3,DEC);
-      u8g2.setCursor(43,30);
+      u8g2.print(volume,DEC);
+      u8g2.setCursor(25,24);
       if (octave==8){
-        u8g2.drawStr(51, 30,"max");
+        u8g2.drawStr(33, 23,"max");
       }
       else if (octave==0){
-          u8g2.drawStr(51, 30,"min");
+          u8g2.drawStr(33, 23,"min");
       }
       u8g2.print(octave,DEC);
-      u8g2.setCursor(2,30);
-      u8g2.print(octave);
-      u8g2.setCursor(70,10);
-      u8g2.print('S');
+      // u8g2.setCursor(2,30);
+      // u8g2.print(octave);
     }
     // u8g2.setCursor(66,30);
     // u8g2.print((char) RX_Message[0]);

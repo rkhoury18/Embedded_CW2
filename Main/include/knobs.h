@@ -5,7 +5,7 @@ class Knob
 {
     public:
         Knob(uint8_t prevAB)
-            : _curRotVal(4),_prevAB(prevAB),_min(-0xFF),_max(0xFF),_prevfunc(0){}
+            : _curRotVal(4),_prevAB(prevAB),_min(-128),_max(256),_prevfunc(0){}
     void UpdateRotateVal (uint8_t curAB){
         switch (curAB | _prevAB<<2){
             case 0x01 : increment(); break;
@@ -21,8 +21,7 @@ class Knob
         _prevAB = curAB;
     }
 
-
-    
+ 
     void SetLimits (int8_t min, int8_t max){
         _min = min;
         _max = max;
@@ -37,6 +36,7 @@ class Knob
     int8_t CurRotVal (){
         return _curRotVal;
     }
+
     private:
         int8_t _prevfunc;
         int8_t _min;

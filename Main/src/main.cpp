@@ -18,10 +18,11 @@
   const char notes[12] = {'C','C','D','D','E','F','F','G','G','A','A','B'};
   const char sharps[12] = {' ','#',' ','#',' ',' ','#',' ','#',' ','#',' '};
 //global variables  
+
+  //Current note being printed
   volatile char currentnote;
   volatile char currentsharp;
-  volatile uint8_t volume_r;
-  volatile uint8_t octave_r;
+
   volatile uint32_t pressedKeysArray[36] = {0};
   SemaphoreHandle_t pressedKeysArrayMutex;
 
@@ -46,6 +47,10 @@
   //Sender variables
   volatile uint8_t octave_s;
   volatile uint8_t volume_s;
+
+  //Receiver variables
+  volatile uint8_t volume_r;
+  volatile uint8_t octave_r;
 
 
   volatile uint8_t keyArray[7];
@@ -214,9 +219,9 @@ void CAN_TX_ISR (void) {
 void CAN_TX_Task (void * pvParameters) {
 	uint8_t msgOut[8];
 	while (1) {
-	xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
-		xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
-		CAN_TX(0x123, msgOut);
+    xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+    xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
+    CAN_TX(0x123, msgOut);
 	}
 }
 
@@ -227,7 +232,9 @@ void scanKeysTask(void * pvParameters) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
     Knob Knob3(0);
     Knob Knob2(0);
-    uint16_t prevPressedkeys = 0;
+    Knob3.SetLimits(0,8);
+    Knob2.SetLimits(0,8);
+    uint16_t prevPressedKeys = 0;
     uint16_t pressedKeys = 0;
     uint8_t TX_Message[8] = {0};
     uint32_t reset[36] = {0};
@@ -268,6 +275,7 @@ void scanKeysTask(void * pvParameters) {
             }
             auto_detect(localwest_detect, localeast_detect);
             __atomic_store_n(&west_detect, localwest_detect, __ATOMIC_RELAXED);
+            __atomic_store_n(&east_detect, localeast_detect, __ATOMIC_RELAXED);
         }
 
         if(receiver){
@@ -288,7 +296,7 @@ void scanKeysTask(void * pvParameters) {
         //Code for getting cords 
         //Variables needed for getting cords
         uint16_t onehot = pressedKeys^0xFFF;
-        uint16_t prevPressedkeysCopy = pressedKeys;
+        uint16_t prevPressedkeysCopy = prevPressedKeys;
         uint16_t onehotCopy = onehot;
         uint8_t p_idx_array[12] = {12,12,12,12,12,12,12,12,12,12,12,12};
         uint8_t r_idx_array[12] = {12,12,12,12,12,12,12,12,12,12,12,12};
@@ -408,7 +416,7 @@ void scanKeysTask(void * pvParameters) {
             }
         }
       }
-      prevPressedkeys = onehot;
+      prevPressedKeys = onehot;
       if (receiver){
         __atomic_store_n(&currentnote, localnote, __ATOMIC_RELAXED);
         __atomic_store_n(&currentsharp, localsharp, __ATOMIC_RELAXED);

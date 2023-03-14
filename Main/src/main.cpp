@@ -238,6 +238,8 @@ void scanKeysTask(void * pvParameters) {
     uint16_t pressedKeys = 0;
     uint8_t TX_Message[8] = {0};
     uint32_t reset[36] = {0};
+    uint8_t prevOctave = 4;
+    uint8_t prevVolume = 4;
 
     while(1){
         vTaskDelayUntil( &xLastWakeTime, xFrequency );
@@ -286,13 +288,15 @@ void scanKeysTask(void * pvParameters) {
           localvolume_r = Knob3.CurRotVal();
           localoctave_r = Knob2.CurRotVal();
           //Store Knob info in the TX_Message
-          if (!singleton){
+          if (!singleton && (localoctave_r != prevOctave || localvolume_r != prevVolume)){
             TX_Message[0] = 'K';
             TX_Message[2] = localoctave_r;
             TX_Message[3] = localvolume_r;
             xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
           }
         }
+        prevOctave = localoctave_r;
+        prevVolume = localvolume_r;
         //Code for getting cords 
         //Variables needed for getting cords
         uint16_t onehot = pressedKeys^0xFFF;

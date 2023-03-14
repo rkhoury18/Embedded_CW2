@@ -4,8 +4,8 @@
 class Knob 
 {
     public:
-        Knob(uint8_t prevAB)
-            : _curRotVal(4),_prevAB(prevAB),_min(-128),_max(256),_prevfunc(0){}
+        Knob(uint8_t prevAB, uint8_t initialcurRotVal)
+            : _curRotVal(initialcurRotVal),_prevAB(prevAB),_min(-128),_max(256),_prevfunc(0){}
     void UpdateRotateVal (uint8_t curAB){
         switch (curAB | _prevAB<<2){
             case 0x01 : increment(); break;

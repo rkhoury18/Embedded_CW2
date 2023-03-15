@@ -683,8 +683,6 @@ void displayUpdateTask(void * pvParameters){
               }
               break;
       }
-      // u8g2.setCursor(80,20);
-      // u8g2.print(wave_r,DEC);
       u8g2.setCursor(32,6);
       u8g2.print(currentnote);
       u8g2.print(currentsharp);

@@ -640,9 +640,11 @@ void displayUpdateTask(void * pvParameters){
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
     u8g2.clearBuffer();         // clear the internal memory
     u8g2.setFont(u8g2_font_courB08_tr); // choose a suitable font
-    u8g2.setCursor(100,20);
-    u8g2.print(pos,DEC);
+    // u8g2.setCursor(100,20);
+    // u8g2.print(pos,DEC);
     if (receiver){
+      uint8_t x, y;
+      u8g2.drawStr(80,8,"Wave(K2):");
       u8g2.drawStr(2, 15,"Vol(K4):");
       u8g2.drawStr(2, 23,"Oct(K3):");
       u8g2.drawStr(2, 6,"Note:");
@@ -650,9 +652,39 @@ void displayUpdateTask(void * pvParameters){
       u8g2.drawStr(39, 32, "K2");
       u8g2.drawStr(80, 32, "K3");
       u8g2.drawStr(116, 32, "K4");
-      // u8g2.drawStr(90, 6, "K:Knob");
-      u8g2.setCursor(80,20);
-      u8g2.print(wave_r,DEC);
+      u8g2.setCursor(2,2);
+      switch (wave_r){
+        case 0:
+              u8g2.drawLine(82,20,100,10);
+              u8g2.drawLine(100,10,100,20);
+              u8g2.drawLine(100,20,118,10);
+              u8g2.drawLine(118,10,118,20);
+              break;
+        case 1:
+              u8g2.drawLine(82,20,90,10);
+              u8g2.drawLine(90,10,98,20);
+              u8g2.drawLine(98,20,106,10);
+              u8g2.drawLine(106,10,114,20);
+              break;
+        case 2:
+              u8g2.drawLine(82,20,90,20);
+              u8g2.drawLine(90,20,90,10);
+              u8g2.drawLine(90,10,100,10);
+              u8g2.drawLine(100,10,100,20);
+              u8g2.drawLine(100,20,110,20);
+              u8g2.drawLine(110,20,110,10);
+              u8g2.drawLine(110,10,120,10);
+              u8g2.drawLine(120,10,120,20);
+              break;
+        case 3: 
+              for (x = 0; x < 40; x++) {
+                y = 32 + 6 * sin(2 * PI * x / 40);
+                u8g2.drawPixel(x+80, y-15);
+              }
+              break;
+      }
+      // u8g2.setCursor(80,20);
+      // u8g2.print(wave_r,DEC);
       u8g2.setCursor(32,6);
       u8g2.print(currentnote);
       u8g2.print(currentsharp);
@@ -672,7 +704,6 @@ void displayUpdateTask(void * pvParameters){
           u8g2.drawStr(58, 23,"min");
       }
       u8g2.print(octave_r,DEC);
-
     }
 
     if (sender){
@@ -732,6 +763,7 @@ void displayUpdateTask(void * pvParameters){
     //Toggle LED
     digitalToggle(LED_BUILTIN);
   }
+
   #endif
 }
 

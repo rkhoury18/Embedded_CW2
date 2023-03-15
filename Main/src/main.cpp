@@ -35,7 +35,7 @@
   volatile uint8_t east_detect;
   
   //Needed to know the position of the keytboard in the chain
-  volatile uint8_t pos;
+  volatile uint8_t pos = 0;
 
   // Role of keyboard  in chain
   volatile bool receiver = false;
@@ -47,15 +47,19 @@
   SemaphoreHandle_t CAN_TX_Semaphore;
   QueueHandle_t msgInQ;
   QueueHandle_t msgOutQ;
+  BaseType_t xHigherPriorityTaskWoken = pdTRUE;
 
   //Sender variables
   volatile uint8_t octave_s;
   volatile uint8_t volume_s;
+  volatile uint8_t wave_s;
+  volatile int32_t vout_s = 0;
 
   //Receiver variables
   volatile uint8_t volume_r = 4;
   volatile uint8_t octave_r = 4;
   volatile uint8_t wave_r = 0;
+  volatile int32_t vout_r = 0;
 
 
   volatile uint8_t keyArray[7];
@@ -130,7 +134,7 @@ void auto_detect(bool west, bool east){
     if(east){ // >=2 modules
       singleton = false;
       uint8_t TX_Message[8] = {'H',pos,octave_r,volume_r,wave_r,0,0,0}; //Handshake, position, 0, 0, 0, 0, 0, 0
-      xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+      xQueueSend(msgOutQ, TX_Message, 0);
     }
     else{
       singleton = true;
@@ -145,80 +149,84 @@ void auto_detect(bool west, bool east){
 
 void sampleISR() {
   if(receiver){
-      static uint32_t phaseAcc[36] = {0};
-      static int increase[36] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
-      int32_t polyphony_vout = 0;
-      switch (wave_r){
-         case 0 :  //Sawtooth
-                for (uint8_t i=0; i<36;i++){
-                  phaseAcc[i] += pressedKeysArray[i];
-                  if(pressedKeysArray[i]){
-                    int32_t Vout = ((phaseAcc[i] >> 24) - 128);
-                    polyphony_vout += Vout >> (8 - volume_r);
-                  }
-                }
-                break;
-          case 1 : //Triangle
+    static uint32_t phaseAcc[36] = {0};
+    static int increase[36] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
+    int32_t polyphony_vout = 0;
+    switch (wave_r){
+        case 0 :  //Sawtooth
               for (uint8_t i=0; i<36;i++){
-                if (increase[i] == 1) {
-                  if (phaseAcc[i] + 2*pressedKeysArray[i] >= phaseAcc[i]){
-                    phaseAcc[i] += 2*pressedKeysArray[i];
-                  }
-                  else{
-                    increase[i] = -1;
-                  }
-                }
-                else {
-                  if ((phaseAcc[i] - 2*pressedKeysArray[i]) <= phaseAcc[i]){
-                    phaseAcc[i] -= 2*pressedKeysArray[i];
-                  }
-                  else{
-                    increase[i] = 1;
-                  } 
-                }
-                if (pressedKeysArray[i]){
+                phaseAcc[i] += pressedKeysArray[i];
+                if(pressedKeysArray[i]){
                   int32_t Vout = ((phaseAcc[i] >> 24) - 128);
-                  polyphony_vout += (Vout /*<< 4*/) >> (8 - volume_r);
-                }
-              }
-              break;
-          case 2 : //Square
-              for (uint8_t i=0; i<36;i++){
-                if (increase[i] == 1) {
-                  if ((phaseAcc[i] + 2*pressedKeysArray[i]) >= phaseAcc[i]){
-                    phaseAcc[i] += 2*pressedKeysArray[i];
-                  }
-                  else{
-                    increase[i] = -1;
-                  }
-                }
-                else {
-                  if ((phaseAcc[i] - 2*pressedKeysArray[i]) <= phaseAcc[i]){
-                    phaseAcc[i] -= 2*pressedKeysArray[i];
-                  }
-                  else{
-                    increase[i] = 1;
-                  }
-                } 
-                if (pressedKeysArray[i]){
-                  int32_t Vout = (increase[i] == 1) ? 127 : -128;
                   polyphony_vout += Vout >> (8 - volume_r);
                 }
               }
               break;
-          case 3 : //Sine
-              for (uint8_t i=0; i<36;i++){
-                  phaseAcc[i] += pressedKeysArray[i];
-                  if (pressedKeysArray[i]){
-                    int32_t Vout = (sineTable[phaseAcc[i] >> 22] >> 24) - 128;
-                    polyphony_vout += Vout >> (8 - volume_r);
-                  }
+        case 1 : //Triangle
+            for (uint8_t i=0; i<36;i++){
+              if (increase[i] == 1) {
+                if (phaseAcc[i] + 2*pressedKeysArray[i] >= phaseAcc[i]){
+                  phaseAcc[i] += 2*pressedKeysArray[i];
+                }
+                else{
+                  increase[i] = -1;
+                }
               }
-              break;
-      }
-      polyphony_vout = max(-128, min(127, (int)polyphony_vout));
-      analogWrite(OUTR_PIN, polyphony_vout + 128);
-    }  
+              else {
+                if ((phaseAcc[i] - 2*pressedKeysArray[i]) <= phaseAcc[i]){
+                  phaseAcc[i] -= 2*pressedKeysArray[i];
+                }
+                else{
+                  increase[i] = 1;
+                } 
+              }
+              if (pressedKeysArray[i]){
+                int32_t Vout = ((phaseAcc[i] >> 24) - 128);
+                polyphony_vout += (Vout /*<< 4*/) >> (8 - volume_r);
+              }
+            }
+            break;
+        case 2 : //Square
+            for (uint8_t i=0; i<36;i++){
+              if (increase[i] == 1) {
+                if ((phaseAcc[i] + 2*pressedKeysArray[i]) >= phaseAcc[i]){
+                  phaseAcc[i] += 2*pressedKeysArray[i];
+                }
+                else{
+                  increase[i] = -1;
+                }
+              }
+              else {
+                if ((phaseAcc[i] - 2*pressedKeysArray[i]) <= phaseAcc[i]){
+                  phaseAcc[i] -= 2*pressedKeysArray[i];
+                }
+                else{
+                  increase[i] = 1;
+                }
+              } 
+              if (pressedKeysArray[i]){
+                int32_t Vout = (increase[i] == 1) ? 127 : -128;
+                polyphony_vout += Vout >> (8 - volume_r);
+              }
+            }
+            break;
+        case 3 : //Sine
+            for (uint8_t i=0; i<36;i++){
+                phaseAcc[i] += pressedKeysArray[i];
+                if (pressedKeysArray[i]){
+                  int32_t Vout = (sineTable[phaseAcc[i] >> 22] >> 24) - 128;
+                  polyphony_vout += Vout >> (8 - volume_r);
+                }
+            }
+            break;
+    }
+    polyphony_vout = max(-128, min(127, (int)polyphony_vout));
+    analogWrite(OUTR_PIN, polyphony_vout + 128);
+    vout_r = polyphony_vout;
+  }  
+  if(sender){
+    analogWrite(OUTR_PIN,vout_s + 128);
+  }
 }
 
 void recieverTask(){
@@ -240,12 +248,12 @@ void recieverTask(){
 }
 
 void senderTask(){
-  //Message received is handshake 
+//Message received is handshake 
   if (RX_Message[0] == 'H'){
     pos = RX_Message[1] + 1;
     octave_s = RX_Message[2] + 1;
     volume_s = RX_Message[3];
-    Serial.printf("HERE recieved %d\n", RX_Message[1]);
+    // Serial.printf("HERE recieved %d\n", RX_Message[1]);
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
       for (uint8_t i=5; i<7; i++) {
         setRow(i);
@@ -260,7 +268,8 @@ void senderTask(){
     xSemaphoreGive(keyArrayMutex);
     if(east_detect){
       uint8_t TX_Message[8] = {'H',pos, octave_s, volume_r, 0, 0, 0, 0};
-      Serial.println("Sending Handshake Again");
+      xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+      // Serial.println("Sending Handshake Again");
     }
   }
   //Info from the knobs
@@ -269,7 +278,11 @@ void senderTask(){
     volume_s = RX_Message[3];
     wave_r = RX_Message[4];
   }
+  else if (RX_Message[0] == 'V'){
+    vout_s = RX_Message[4]<<24 | RX_Message[3]<<16 | RX_Message[2]<<8 | RX_Message[1];
+  }
 }
+
 
 void decodeTask(void * pvParameters){
   while(1){
@@ -305,6 +318,18 @@ void CAN_TX_Task (void * pvParameters) {
 }
 
 
+void sendSoundTask (void * pvParameters) {
+  const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  while(1){
+    vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    if(receiver && !singleton){
+      uint8_t TX_Message[8] = {'V', vout_r, vout_r>>8, vout_r>>16, vout_r>>24, 0, 0, 0};
+      xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+    }
+  }
+}
+
 void scanKeysTask(void * pvParameters) {
    #ifndef TEST_SCAN_KEYS
     const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
@@ -322,6 +347,7 @@ void scanKeysTask(void * pvParameters) {
     uint8_t prevOctave = 4;
     uint8_t prevVolume = 4;
     uint8_t prevWave = 0;
+    bool start = true;
 
     while(1){
         vTaskDelayUntil( &xLastWakeTime, xFrequency );
@@ -349,7 +375,12 @@ void scanKeysTask(void * pvParameters) {
         uint8_t localwest_detect = ((localkeyArray[5]&0x08)>>3)^0x01;
         uint8_t localeast_detect = ((localkeyArray[6]&0x08)>>3)^0x01;
 
-        if (localwest_detect != west_detect || localeast_detect != east_detect){ //east or west detect has changed
+        if (start){
+          auto_detect(localwest_detect, localeast_detect);
+          start = false;
+        }
+
+        if (localwest_detect != west_detect){ //west detect has changed
             if(receiver){
               // reset pressedKeysArray
               xSemaphoreTake(pressedKeysArrayMutex, portMAX_DELAY);
@@ -360,7 +391,23 @@ void scanKeysTask(void * pvParameters) {
             }
             auto_detect(localwest_detect, localeast_detect);
             __atomic_store_n(&west_detect, localwest_detect, __ATOMIC_RELAXED);
-            __atomic_store_n(&east_detect, localeast_detect, __ATOMIC_RELAXED);
+        }
+
+        if (localeast_detect != east_detect){
+          if(receiver){
+            // reset pressedKeysArray
+            xSemaphoreTake(pressedKeysArrayMutex, portMAX_DELAY);
+              for (uint8_t i = 0; i < 36; i++){
+                pressedKeysArray[i] = 0;
+              }
+            xSemaphoreGive(pressedKeysArrayMutex);
+          }
+          auto_detect(localwest_detect, localeast_detect);
+          if(sender){
+            uint8_t TX_Message[8] = {'H',pos, octave_s, volume_s, 0, 0, 0, 0};
+            xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+          }
+          __atomic_store_n(&east_detect, localeast_detect, __ATOMIC_RELAXED);
         }
 
         if(receiver){
@@ -706,7 +753,7 @@ void setup() {
     "scanKeys",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
+    3,			/* Task priority */
     &scanKeysHandle );  /* Pointer to store the task handle */
 
     TaskHandle_t displayUpdateTaskHandle = NULL;
@@ -733,8 +780,17 @@ void setup() {
     "CanTX",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    3,			/* Task priority */
+    2,			/* Task priority */
     &CAN_TX_TaskHandle);
+
+    TaskHandle_t sendSoundTaskHandle = NULL;
+    xTaskCreate(
+    sendSoundTask,		/* Function that implements the task */
+    "sendSound",		/* Text name for the task */
+    256,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    2,			/* Task priority */ 
+    &sendSoundTaskHandle);
   #endif
 
   #ifdef TEST_SCAN_KEYS

@@ -13,8 +13,6 @@
 //#define TEST_DISPLAY_UPDATE
 
 //Wave Selector code 
-volatile int increase[36] = {0};
-volatile int wave_select = 3;
 
 //Constants
   const uint32_t interval = 100; //Display update interval
@@ -55,9 +53,9 @@ volatile int wave_select = 3;
   volatile uint8_t volume_s;
 
   //Receiver variables
-  volatile uint8_t volume_r;
-  volatile uint8_t octave_r;
-  volatile uint8_t wave_r;
+  volatile uint8_t volume_r = 4;
+  volatile uint8_t octave_r = 4;
+  volatile uint8_t wave_r = 0;
 
 
   volatile uint8_t keyArray[7];
@@ -129,9 +127,9 @@ void auto_detect(bool west, bool east){
     pos = 0;
     receiver = true;
     sender = false;
-    if(east){ //2 modules
+    if(east){ // >=2 modules
       singleton = false;
-      uint8_t TX_Message[8] = {'H',0,0,0,0,0,0,0}; //Handshake, id, modules, position, 0, 0, 0, 0, 0
+      uint8_t TX_Message[8] = {'H',pos,octave_r,volume_r,wave_r,0,0,0}; //Handshake, position, 0, 0, 0, 0, 0, 0
       xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
     }
     else{
@@ -145,26 +143,10 @@ void auto_detect(bool west, bool east){
   }
 }
 
-// void sampleISR() {
-//   if(receiver){
-//     static uint32_t phaseAcc[36] = {0};
-//     int32_t polyphony_vout = 0;
-//     for(uint8_t i=0; i<36; i++){
-//       phaseAcc[i] += pressedKeysArray[i];
-//       if(pressedKeysArray[i]){
-//         int32_t Vout = ((phaseAcc[i] >> 24) - 128);
-//         polyphony_vout += Vout;
-//       }
-//     }
-//     polyphony_vout = polyphony_vout >> (8 - volume_r);
-//     polyphony_vout = max(-128, min(127, (int)polyphony_vout));
-//     analogWrite(OUTR_PIN, polyphony_vout + 128);
-//   }
-// }
-
 void sampleISR() {
   if(receiver){
       static uint32_t phaseAcc[36] = {0};
+      static int increase[36] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
       int32_t polyphony_vout = 0;
       switch (wave_r){
          case 0 :  //Sawtooth
@@ -172,42 +154,33 @@ void sampleISR() {
                   phaseAcc[i] += pressedKeysArray[i];
                   if(pressedKeysArray[i]){
                     int32_t Vout = ((phaseAcc[i] >> 24) - 128);
-                    polyphony_vout += Vout;
+                    polyphony_vout += Vout >> (8 - volume_r);
                   }
                 }
-                polyphony_vout = polyphony_vout >> (8 - volume_r);
-                polyphony_vout = max(-128, min(127, (int)polyphony_vout));
-                analogWrite(OUTR_PIN, polyphony_vout + 128);
                 break;
           case 1 : //Triangle
               for (uint8_t i=0; i<36;i++){
                 if (increase[i] == 1) {
-                      if (phaseAcc[i] + 2*pressedKeysArray[i] >= phaseAcc[i]){
-                        phaseAcc[i] += 2*pressedKeysArray[i];
-                      }
-                      else{
-                        phaseAcc[i] -= 1;
-                        increase[i] = -1;
-                      }
-                  
+                  if (phaseAcc[i] + 2*pressedKeysArray[i] >= phaseAcc[i]){
+                    phaseAcc[i] += 2*pressedKeysArray[i];
+                  }
+                  else{
+                    increase[i] = -1;
+                  }
                 }
                 else {
-                    if ((phaseAcc[i] - 2*pressedKeysArray[i]) <= phaseAcc[i]){
-                      phaseAcc[i] -= 2*pressedKeysArray[i];
-                    }
-                    else{
-                      phaseAcc[i] += 1;
-                      increase[i] = 1;
-                    }
-                  
+                  if ((phaseAcc[i] - 2*pressedKeysArray[i]) <= phaseAcc[i]){
+                    phaseAcc[i] -= 2*pressedKeysArray[i];
+                  }
+                  else{
+                    increase[i] = 1;
+                  } 
                 }
                 if (pressedKeysArray[i]){
-                  polyphony_vout += ((phaseAcc[i] >> 24) - 128);
+                  int32_t Vout = ((phaseAcc[i] >> 24) - 128);
+                  polyphony_vout += (Vout /*<< 4*/) >> (8 - volume_r);
                 }
               }
-                polyphony_vout = polyphony_vout >> (8 - volume_r);
-                polyphony_vout = max(-128, min(127, (int)polyphony_vout));
-                analogWrite(OUTR_PIN, polyphony_vout + 128);
               break;
           case 2 : //Square
               for (uint8_t i=0; i<36;i++){
@@ -216,46 +189,41 @@ void sampleISR() {
                     phaseAcc[i] += 2*pressedKeysArray[i];
                   }
                   else{
-                    phaseAcc[i] -= 1;
                     increase[i] = -1;
                   }
-
                 }
                 else {
                   if ((phaseAcc[i] - 2*pressedKeysArray[i]) <= phaseAcc[i]){
                     phaseAcc[i] -= 2*pressedKeysArray[i];
                   }
                   else{
-                    phaseAcc[i] += 1;
                     increase[i] = 1;
                   }
                 } 
                 if (pressedKeysArray[i]){
-                  polyphony_vout += (phaseAcc[i] == 0) ? 0 : (increase[i] == 1) ? 127 : (increase[i] == 1) ? -128 : 0;
+                  int32_t Vout = (increase[i] == 1) ? 127 : -128;
+                  polyphony_vout += Vout >> (8 - volume_r);
                 }
               }
-              polyphony_vout = polyphony_vout >> (8 - volume_r);
-                polyphony_vout = max(-128, min(127, (int)polyphony_vout));
-              analogWrite(OUTR_PIN, polyphony_vout + 128);
               break;
           case 3 : //Sine
               for (uint8_t i=0; i<36;i++){
                   phaseAcc[i] += pressedKeysArray[i];
                   if (pressedKeysArray[i]){
-                    polyphony_vout += (sineTable[phaseAcc[i] >> 22] >> 24) - 128;
+                    int32_t Vout = (sineTable[phaseAcc[i] >> 22] >> 24) - 128;
+                    polyphony_vout += Vout >> (8 - volume_r);
                   }
               }
-              polyphony_vout = polyphony_vout >> (8 - volume_r);
-              polyphony_vout = max(-128, min(127, (int)polyphony_vout));
-              analogWrite(OUTR_PIN,polyphony_vout+ 128);
               break;
       }
+      polyphony_vout = max(-128, min(127, (int)polyphony_vout));
+      analogWrite(OUTR_PIN, polyphony_vout + 128);
     }  
 }
 
 void recieverTask(){
   uint32_t recieverStep = 0;
-  Serial.printf("Recieved: %c %d %d %d\n", RX_Message[0], RX_Message[1], RX_Message[2], RX_Message[3]);
+  //Serial.printf("Recieved: %c %d %d %d\n", RX_Message[0], RX_Message[1], RX_Message[2], RX_Message[3]);
   //If key is released set to 0
   if (RX_Message[0] == 'R'){
     recieverStep = 0;
@@ -275,12 +243,24 @@ void senderTask(){
   //Message received is handshake 
   if (RX_Message[0] == 'H'){
     pos = RX_Message[1] + 1;
+    octave_s = RX_Message[2] + 1;
+    volume_s = RX_Message[3];
+    Serial.printf("HERE recieved %d\n", RX_Message[1]);
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+      for (uint8_t i=5; i<7; i++) {
+        setRow(i);
+        digitalWrite(OUTR_PIN,1);         //Enable selected row
+        digitalWrite(REN_PIN,1);          //Enable selected row
+        delayMicroseconds(3);             //Wait for column inputs to stabilise
+        keyArray[i] = readCols();         //Read column inputs
+        digitalWrite(REN_PIN,0);          //Disable selected row
+      }
       uint8_t west_detect = ((keyArray[5]&0x08)>>3)^0x01;
       uint8_t east_detect = ((keyArray[6]&0x08)>>3)^0x01;
     xSemaphoreGive(keyArrayMutex);
     if(east_detect){
-      uint8_t TX_Message[8] = {'H',pos, 0, 0, 0, 0, 0, 0};
+      uint8_t TX_Message[8] = {'H',pos, octave_s, volume_r, 0, 0, 0, 0};
+      Serial.println("Sending Handshake Again");
     }
   }
   //Info from the knobs
@@ -613,6 +593,8 @@ void displayUpdateTask(void * pvParameters){
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
     u8g2.clearBuffer();         // clear the internal memory
     u8g2.setFont(u8g2_font_courB08_tr); // choose a suitable font
+    u8g2.setCursor(100,20);
+    u8g2.print(pos,DEC);
     if (receiver){
       u8g2.drawStr(2, 15,"Vol(K4):");
       u8g2.drawStr(2, 23,"Oct(K3):");
@@ -649,10 +631,10 @@ void displayUpdateTask(void * pvParameters){
     if (sender){
       u8g2.drawStr(2, 15,"Vol:");
       u8g2.drawStr(2, 23,"Oct:");
-      u8g2.drawStr(2, 6,"Note:");
+      // u8g2.drawStr(2, 6,"Note:");
       u8g2.setCursor(35,10);
-      u8g2.print(currentnote);
-      u8g2.print(currentsharp);
+      // u8g2.print(currentnote);
+      // u8g2.print(currentsharp);
       u8g2.setCursor(25,16);
       if (volume_s==8){
         u8g2.drawStr(33, 15,"max");
@@ -867,7 +849,7 @@ void setup() {
     digitalWrite(OUT_PIN,outBits[i]); //Set value to latch in DFF
   }
   
-  delayMicroseconds(100);
+  delayMicroseconds(1000);
 
   for (uint8_t i=5; i<7; i++) {
     setRow(i);

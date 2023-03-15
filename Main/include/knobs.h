@@ -5,15 +5,15 @@ class Knob
 {
     public:
         Knob(uint8_t prevAB, uint8_t initialcurRotVal)
-            : _curRotVal(initialcurRotVal),_prevAB(prevAB),_min(-128),_max(256),_prevfunc(0){}
+            : _curRotVal(initialcurRotVal),_prevAB(prevAB),_min(-128),_max(127),_prevfunc(0){}
     void UpdateRotateVal (uint8_t curAB){
         switch (curAB | _prevAB<<2){
             case 0x01 : increment(); break;
-            // case 0x03 : impossibleState(); break;
+            case 0x03 : impossibleState(); break;
             case 0x04 : decrement(); break;
-            // case 0x06 : impossibleState(); break;
+            case 0x06 : impossibleState(); break;
             case 0x0B : decrement(); break;
-            // case 0x0A : impossibleState(); break;
+            case 0x09 : impossibleState(); break;
             case 0x0E : increment(); break;
             case 0x0C : impossibleState(); break;
             default: break;

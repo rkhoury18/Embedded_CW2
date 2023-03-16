@@ -27,7 +27,8 @@
   volatile char currentnote;
   volatile char currentsharp;
 
-  volatile uint32_t pressedKeysArray[36] = {0};
+  volatile uint32_t pressedKeysArrayMaj = 0; // 12 bits for first pos 12 bits for second pos, 00000000
+  volatile uint16_t pressedKeysArrayMin = 0; // 12 bits for third pos, 0000
   SemaphoreHandle_t pressedKeysArrayMutex;
 
   //Keyboard connection values
@@ -54,6 +55,9 @@
   volatile uint8_t volume_s;
   volatile uint8_t wave_s;
   volatile int32_t vout_s = 0;
+  volatile uint32_t maj_s = 0;
+  volatile uint16_t min_s = 0;
+
 
   //Receiver variables
   volatile uint8_t volume_r = 4;
@@ -148,103 +152,134 @@ void auto_detect(bool west, bool east){
 }
 
 void sampleISR() {
+  uint64_t pressedKeysArray = 0;
+  uint8_t baseoct;
+  uint8_t vol;
+  uint8_t wave;
   if(receiver){
+    pressedKeysArray = pressedKeysArrayMin << 24 | pressedKeysArrayMaj;
+    baseoct = octave_r - 4;
+    vol = volume_r;
+    wave = wave_r;
+  }
+  else if(sender){
+    pressedKeysArray = min_s << 24 | maj_s;
+    baseoct = octave_s - pos - 4;
+    vol = volume_s;
+    wave = wave_s;
+  }
     static uint32_t phaseAcc[36] = {0};
     static int increase[36] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
     int32_t polyphony_vout = 0;
-    switch (wave_r){
+    switch (wave){
         case 0 :  //Sawtooth
-              for (uint8_t i=0; i<36;i++){
-                phaseAcc[i] += pressedKeysArray[i];
-                if(pressedKeysArray[i]){
-                  int32_t Vout = ((phaseAcc[i] >> 24) - 128);
-                  polyphony_vout += Vout >> (8 - volume_r);
-                }
-              }
-              break;
+          for (uint8_t i=0; i<36;i++){
+            int8_t shift = baseoct + (uint8_t)(i/12);
+            uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
+            if((pressedKeysArray >> i) & 0x1){
+              phaseAcc[i] += step;
+              int32_t Vout = ((phaseAcc[i] >> 24) - 128);
+              polyphony_vout += Vout;
+            }
+          }
+          break;
         case 1 : //Triangle
-            for (uint8_t i=0; i<36;i++){
+          for (uint8_t i=0; i<36;i++){
+            int8_t shift = baseoct + (uint8_t)(i/12);
+            uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
+            if((pressedKeysArray >> i) & 0x1){
               if (increase[i] == 1) {
-                if (phaseAcc[i] + 2*pressedKeysArray[i] >= phaseAcc[i]){
-                  phaseAcc[i] += 2*pressedKeysArray[i];
+                if (phaseAcc[i] + 2*step >= phaseAcc[i]){
+                  phaseAcc[i] += 2*step;
                 }
                 else{
                   increase[i] = -1;
                 }
               }
               else {
-                if ((phaseAcc[i] - 2*pressedKeysArray[i]) <= phaseAcc[i]){
-                  phaseAcc[i] -= 2*pressedKeysArray[i];
+                if ((phaseAcc[i] - 2*step) <= phaseAcc[i]){
+                  phaseAcc[i] -= 2*step;
                 }
                 else{
                   increase[i] = 1;
                 } 
               }
-              if (pressedKeysArray[i]){
-                int32_t Vout = ((phaseAcc[i] >> 24) - 128);
-                polyphony_vout += (Vout /*<< 4*/) >> (8 - volume_r);
-              }
+              int32_t Vout = ((phaseAcc[i] >> 24) - 128);
+              polyphony_vout += Vout;
             }
-            break;
+          }
+          break;
         case 2 : //Square
-            for (uint8_t i=0; i<36;i++){
+          for (uint8_t i=0; i<36;i++){
+            int8_t shift = baseoct + (uint8_t)(i/12);
+            uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
+            if((pressedKeysArray >> i) & 0x1){
               if (increase[i] == 1) {
-                if ((phaseAcc[i] + 2*pressedKeysArray[i]) >= phaseAcc[i]){
-                  phaseAcc[i] += 2*pressedKeysArray[i];
+                if ((phaseAcc[i] + 2*step) >= phaseAcc[i]){
+                  phaseAcc[i] += 2*step;
                 }
                 else{
                   increase[i] = -1;
                 }
               }
               else {
-                if ((phaseAcc[i] - 2*pressedKeysArray[i]) <= phaseAcc[i]){
-                  phaseAcc[i] -= 2*pressedKeysArray[i];
+                if ((phaseAcc[i] - 2*step) <= phaseAcc[i]){
+                  phaseAcc[i] -= 2*step;
                 }
                 else{
                   increase[i] = 1;
                 }
-              } 
-              if (pressedKeysArray[i]){
-                int32_t Vout = (increase[i] == 1) ? 127 : -128;
-                polyphony_vout += Vout >> (8 - volume_r);
               }
+              int32_t Vout = (increase[i] == 1) ? 127 : -128;
+              polyphony_vout += Vout;
             }
-            break;
+          }
+          break;
         case 3 : //Sine
-            for (uint8_t i=0; i<36;i++){
-                phaseAcc[i] += pressedKeysArray[i];
-                if (pressedKeysArray[i]){
-                  int32_t Vout = (sineTable[phaseAcc[i] >> 22] >> 24) - 128;
-                  polyphony_vout += Vout >> (8 - volume_r);
-                }
+          for (uint8_t i=0; i<36;i++){
+            int8_t shift = baseoct + (uint8_t)(i/12);
+            uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
+            if((pressedKeysArray >> i) & 0x1){
+              phaseAcc[i] += step;
+              int32_t Vout = (sineTable[phaseAcc[i] >> 22] >> 24) - 128;
+              polyphony_vout += Vout;
             }
-            break;
+          }
+          break;
     }
+    polyphony_vout = polyphony_vout >> (8 - vol);
     polyphony_vout = max(-128, min(127, (int)polyphony_vout));
     analogWrite(OUTR_PIN, polyphony_vout + 128);
     vout_r = polyphony_vout;
-  }  
-  if(sender){
-    analogWrite(OUTR_PIN,vout_s + 128);
-  }
+  // if(sender){
+  //   analogWrite(OUTR_PIN,vout_s + 128);
+  // }
 }
 
 void recieverTask(){
-  uint32_t recieverStep = 0;
-  //Serial.printf("Recieved: %c %d %d %d\n", RX_Message[0], RX_Message[1], RX_Message[2], RX_Message[3]);
-  //If key is released set to 0
+  uint32_t localpressedKeysArrayMaj = pressedKeysArrayMaj;
+  uint16_t localpressedKeysArrayMin = pressedKeysArrayMin;
   if (RX_Message[0] == 'R'){
-    recieverStep = 0;
+    if(RX_Message[3] == 1){
+      localpressedKeysArrayMaj &= ~(1 << (12+RX_Message[2]));
+    }
+    else if(RX_Message[3] == 2){
+      localpressedKeysArrayMin &= ~(1 << RX_Message[2]);
+    }
   }
   //If key is pressed set to correct step size
   else if (RX_Message[0] == 'P'){
-    int8_t shift = RX_Message[1]-4;
-    recieverStep = shift>0 ? stepSizes[RX_Message[2]]<<shift : stepSizes[RX_Message[2]]>>-shift;
+    if(RX_Message[3] == 1){
+      localpressedKeysArrayMaj |= (1 << (12+RX_Message[2]));
+    }
+    else if(RX_Message[3] == 2){
+      localpressedKeysArrayMin |= (1 << RX_Message[2]);
+    }
   }
+  // Serial.printf("keys recieved %hu\n", localpressedKeysArrayMaj);
   //Write step size to the pressedKeys array to play it
-  xSemaphoreTake(pressedKeysArrayMutex, portMAX_DELAY);
-  pressedKeysArray[(12*RX_Message[3])+RX_Message[2]] = recieverStep;
-  xSemaphoreGive(pressedKeysArrayMutex);
+  __atomic_store_n(&pressedKeysArrayMaj, localpressedKeysArrayMaj,__ATOMIC_RELAXED);
+  __atomic_store_n(&pressedKeysArrayMin, localpressedKeysArrayMin,__ATOMIC_RELAXED);
 }
 
 void senderTask(){
@@ -276,10 +311,14 @@ void senderTask(){
   else if (RX_Message[0] == 'K'){
     octave_s = RX_Message[2] + pos;
     volume_s = RX_Message[3];
-    wave_r = RX_Message[4];
+    wave_s = RX_Message[4];
   }
   else if (RX_Message[0] == 'V'){
-    vout_s = RX_Message[4]<<24 | RX_Message[3]<<16 | RX_Message[2]<<8 | RX_Message[1];
+    uint32_t localmaj = RX_Message[3]<<16 | RX_Message[2]<<8 | RX_Message[1];
+    uint16_t localmin = RX_Message[5]<<8 | RX_Message[4];
+    //Serial.printf("Vout: %d\n", vout_s);
+    __atomic_store_n(&maj_s, localmaj, __ATOMIC_RELAXED);
+    __atomic_store_n(&min_s, localmin, __ATOMIC_RELAXED);
   }
 }
 
@@ -324,8 +363,9 @@ void sendSoundTask (void * pvParameters) {
   while(1){
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
     if(receiver && !singleton){
-      uint8_t TX_Message[8] = {'V', vout_r, vout_r>>8, vout_r>>16, vout_r>>24, 0, 0, 0};
+      uint8_t TX_Message[8] = {'V', pressedKeysArrayMaj, pressedKeysArrayMaj>>8, pressedKeysArrayMaj>>16, pressedKeysArrayMin>>8, pressedKeysArrayMin>>16, 0, 0};
       xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+      // Serial.printf("Sending: %d\n", TX_Message[4]<<24 | TX_Message[3]<<16 | TX_Message[2]<<8 | TX_Message[1]);
     }
   }
 }
@@ -357,7 +397,7 @@ void scanKeysTask(void * pvParameters) {
         uint8_t localvolume_r = volume_r;
         uint8_t localoctave_r= octave_r;
         uint8_t localwave_r = wave_r;
-        
+        uint32_t localpressedKeysArrayMaj = pressedKeysArrayMaj;
         uint8_t localkeyArray[7] = {0};
         for (uint8_t i = 0; i < 7; i++){
           setRow(i);
@@ -382,12 +422,9 @@ void scanKeysTask(void * pvParameters) {
 
         if (localwest_detect != west_detect){ //west detect has changed
             if(receiver){
-              // reset pressedKeysArray
-              xSemaphoreTake(pressedKeysArrayMutex, portMAX_DELAY);
-                for (uint8_t i = 0; i < 36; i++){
-                  pressedKeysArray[i] = 0;
-                }
-              xSemaphoreGive(pressedKeysArrayMutex);
+                localpressedKeysArrayMaj = 0;
+                __atomic_store_n(&pressedKeysArrayMaj, localpressedKeysArrayMaj, __ATOMIC_RELAXED);
+                __atomic_store_n(&pressedKeysArrayMin, 0x0000, __ATOMIC_RELAXED);
             }
             auto_detect(localwest_detect, localeast_detect);
             __atomic_store_n(&west_detect, localwest_detect, __ATOMIC_RELAXED);
@@ -396,11 +433,9 @@ void scanKeysTask(void * pvParameters) {
         if (localeast_detect != east_detect){
           if(receiver){
             // reset pressedKeysArray
-            xSemaphoreTake(pressedKeysArrayMutex, portMAX_DELAY);
-              for (uint8_t i = 0; i < 36; i++){
-                pressedKeysArray[i] = 0;
-              }
-            xSemaphoreGive(pressedKeysArrayMutex);
+            localpressedKeysArrayMaj = 0;
+            __atomic_store_n(&pressedKeysArrayMaj, localpressedKeysArrayMaj, __ATOMIC_RELAXED);
+            __atomic_store_n(&pressedKeysArrayMin, 0x0000, __ATOMIC_RELAXED);
           }
           auto_detect(localwest_detect, localeast_detect);
           if(sender){
@@ -488,18 +523,17 @@ void scanKeysTask(void * pvParameters) {
               localsharp = sharps[p_idx_array[0]];
 
               
-              int8_t shift = localoctave_r-4;
-              xSemaphoreTake(pressedKeysArrayMutex, portMAX_DELAY);
+              //int8_t shift = localoctave_r-4;
+              
               for (uint8_t i = 0; i < 12; i++){
                 if (p_idx_array[i] != 12) {
-                  localstepsize = shift>0 ? stepSizes[p_idx_array[i]]<<shift : stepSizes[p_idx_array[i]]>>-shift;
-                  pressedKeysArray[p_idx_array[i]] = localstepsize;
+                  //localstepsize = shift>0 ? stepSizes[p_idx_array[i]]<<shift : stepSizes[p_idx_array[i]]>>-shift;
+                  localpressedKeysArrayMaj |= (1<<p_idx_array[i]);
                 }
                 else{
                   break;
                 }
               }
-              xSemaphoreGive(pressedKeysArrayMutex);
           }
         else if(sender){
           for (uint8_t i = 0; i < 12; i++){
@@ -528,16 +562,14 @@ void scanKeysTask(void * pvParameters) {
                 localnote = notes[curr_idx];
                 localsharp = sharps[curr_idx];
             }
-          xSemaphoreTake(pressedKeysArrayMutex, portMAX_DELAY);
           for (uint8_t i = 0; i < 12; i++){
             if (r_idx_array[i] != 12) {
-              pressedKeysArray[r_idx_array[i]] = 0;
+              localpressedKeysArrayMaj &= ~(1<<r_idx_array[i]);
             }
             else{
               break;
             }
           }
-          xSemaphoreGive(pressedKeysArrayMutex);
         }
         else if(sender){
             for (uint8_t i = 0; i < 12; i++){
@@ -556,7 +588,9 @@ void scanKeysTask(void * pvParameters) {
         }
       }
       prevPressedKeys = onehot;
+      // Serial.printf("Keys %hu\n",localpressedKeysArrayMaj);
       if (receiver){
+        __atomic_store_n(&pressedKeysArrayMaj, localpressedKeysArrayMaj, __ATOMIC_RELAXED);
         __atomic_store_n(&currentnote, localnote, __ATOMIC_RELAXED);
         __atomic_store_n(&currentsharp, localsharp, __ATOMIC_RELAXED);
         __atomic_store_n(&volume_r, localvolume_r, __ATOMIC_RELAXED);
@@ -801,7 +835,7 @@ void setup() {
     "decode",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
+    3,			/* Task priority */
     &decodeTaskHandle);
 
     TaskHandle_t CAN_TX_TaskHandle = NULL;
@@ -810,7 +844,7 @@ void setup() {
     "CanTX",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
+    3,			/* Task priority */
     &CAN_TX_TaskHandle);
 
     TaskHandle_t sendSoundTaskHandle = NULL;
@@ -819,7 +853,7 @@ void setup() {
     "sendSound",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */ 
+    4,			/* Task priority */ 
     &sendSoundTaskHandle);
   #endif
 

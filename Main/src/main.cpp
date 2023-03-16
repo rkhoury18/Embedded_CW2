@@ -9,7 +9,7 @@
 // #define reciever 0
 
 //#define DISABLE_THREADS
-// #define TEST_SCAN_KEYS
+//#define TEST_SCAN_KEYS
 //#define TEST_DISPLAY_UPDATE
 
 //Wave Selector code 
@@ -27,8 +27,8 @@
   volatile char currentnote;
   volatile char currentsharp;
 
-  volatile uint32_t pressedKeysArrayMaj = 0; // 12 bits for first pos 12 bits for second pos, 00000000
-  volatile uint16_t pressedKeysArrayMin = 0; // 12 bits for third pos, 0000
+  volatile uint32_t pressedKeysMin = 0; // 12 bits for first pos 12 bits for second pos, 00000000
+  volatile uint16_t pressedKeysMaj = 0; // 12 bits for third pos, 0000
   SemaphoreHandle_t pressedKeysArrayMutex;
 
   //Keyboard connection values
@@ -157,7 +157,7 @@ void sampleISR() {
   uint8_t vol;
   uint8_t wave;
   if(receiver){
-    pressedKeysArray = pressedKeysArrayMin << 24 | pressedKeysArrayMaj;
+    pressedKeysArray = pressedKeysMaj << 24 | pressedKeysMin;
     baseoct = octave_r - 4;
     vol = volume_r;
     wave = wave_r;
@@ -257,29 +257,29 @@ void sampleISR() {
 }
 
 void recieverTask(){
-  uint32_t localpressedKeysArrayMaj = pressedKeysArrayMaj;
-  uint16_t localpressedKeysArrayMin = pressedKeysArrayMin;
+  uint32_t localpressedKeysMin = pressedKeysMin;
+  uint16_t localpressedKeysMaj = pressedKeysMaj;
   if (RX_Message[0] == 'R'){
     if(RX_Message[3] == 1){
-      localpressedKeysArrayMaj &= ~(1 << (12+RX_Message[2]));
+      localpressedKeysMin &= ~(1 << (12+RX_Message[2]));
     }
     else if(RX_Message[3] == 2){
-      localpressedKeysArrayMin &= ~(1 << RX_Message[2]);
+      localpressedKeysMaj &= ~(1 << RX_Message[2]);
     }
   }
   //If key is pressed set to correct step size
   else if (RX_Message[0] == 'P'){
     if(RX_Message[3] == 1){
-      localpressedKeysArrayMaj |= (1 << (12+RX_Message[2]));
+      localpressedKeysMin |= (1 << (12+RX_Message[2]));
     }
     else if(RX_Message[3] == 2){
-      localpressedKeysArrayMin |= (1 << RX_Message[2]);
+      localpressedKeysMaj |= (1 << RX_Message[2]);
     }
   }
   // Serial.printf("keys recieved %hu\n", localpressedKeysArrayMaj);
   //Write step size to the pressedKeys array to play it
-  __atomic_store_n(&pressedKeysArrayMaj, localpressedKeysArrayMaj,__ATOMIC_RELAXED);
-  __atomic_store_n(&pressedKeysArrayMin, localpressedKeysArrayMin,__ATOMIC_RELAXED);
+  __atomic_store_n(&pressedKeysMin, localpressedKeysMin,__ATOMIC_RELAXED);
+  __atomic_store_n(&pressedKeysMaj, localpressedKeysMaj,__ATOMIC_RELAXED);
 }
 
 void senderTask(){
@@ -288,7 +288,7 @@ void senderTask(){
     pos = RX_Message[1] + 1;
     octave_s = RX_Message[2] + 1;
     volume_s = RX_Message[3];
-    // Serial.printf("HERE recieved %d\n", RX_Message[1]);
+
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
       for (uint8_t i=5; i<7; i++) {
         setRow(i);
@@ -301,10 +301,11 @@ void senderTask(){
       uint8_t west_detect = ((keyArray[5]&0x08)>>3)^0x01;
       uint8_t east_detect = ((keyArray[6]&0x08)>>3)^0x01;
     xSemaphoreGive(keyArrayMutex);
+
+    //Send to other keyboards connected to get their position
     if(east_detect){
       uint8_t TX_Message[8] = {'H',pos, octave_s, volume_r, 0, 0, 0, 0};
       xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
-      // Serial.println("Sending Handshake Again");
     }
   }
   //Info from the knobs
@@ -313,10 +314,10 @@ void senderTask(){
     volume_s = RX_Message[3];
     wave_s = RX_Message[4];
   }
+  //Voltage message to know what notes to play
   else if (RX_Message[0] == 'V'){
     uint32_t localmaj = RX_Message[3]<<16 | RX_Message[2]<<8 | RX_Message[1];
     uint16_t localmin = RX_Message[5]<<8 | RX_Message[4];
-    //Serial.printf("Vout: %d\n", vout_s);
     __atomic_store_n(&maj_s, localmaj, __ATOMIC_RELAXED);
     __atomic_store_n(&min_s, localmin, __ATOMIC_RELAXED);
   }
@@ -363,7 +364,7 @@ void sendSoundTask (void * pvParameters) {
   while(1){
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
     if(receiver && !singleton){
-      uint8_t TX_Message[8] = {'V', pressedKeysArrayMaj, pressedKeysArrayMaj>>8, pressedKeysArrayMaj>>16, pressedKeysArrayMin>>8, pressedKeysArrayMin>>16, 0, 0};
+      uint8_t TX_Message[8] = {'V', pressedKeysMin, pressedKeysMin>>8, pressedKeysMin>>16, pressedKeysMaj>>8, pressedKeysMaj>>16, 0, 0};
       xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
       // Serial.printf("Sending: %d\n", TX_Message[4]<<24 | TX_Message[3]<<16 | TX_Message[2]<<8 | TX_Message[1]);
     }
@@ -374,6 +375,7 @@ void scanKeysTask(void * pvParameters) {
    #ifndef TEST_SCAN_KEYS
     const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
     TickType_t xLastWakeTime = xTaskGetTickCount();
+    // Classes initialisations and variables needed for task
     Knob Knob3(0,4);
     Knob Knob2(0,4);
     Knob Knob1 (0,0);
@@ -397,8 +399,9 @@ void scanKeysTask(void * pvParameters) {
         uint8_t localvolume_r = volume_r;
         uint8_t localoctave_r= octave_r;
         uint8_t localwave_r = wave_r;
-        uint32_t localpressedKeysArrayMaj = pressedKeysArrayMaj;
+        uint32_t localpressedKeysMin = pressedKeysMin;
         uint8_t localkeyArray[7] = {0};
+        //Get keys info
         for (uint8_t i = 0; i < 7; i++){
           setRow(i);
           delayMicroseconds(3);
@@ -415,27 +418,27 @@ void scanKeysTask(void * pvParameters) {
         uint8_t localwest_detect = ((localkeyArray[5]&0x08)>>3)^0x01;
         uint8_t localeast_detect = ((localkeyArray[6]&0x08)>>3)^0x01;
 
+        //If the keyboards didn't get power at the same time run autodetect again to make sure we get a correct outcome
         if (start){
           auto_detect(localwest_detect, localeast_detect);
           start = false;
         }
 
+        //If a keyboard is connected or disconnected run autodetect again
         if (localwest_detect != west_detect){ //west detect has changed
             if(receiver){
-                localpressedKeysArrayMaj = 0;
-                __atomic_store_n(&pressedKeysArrayMaj, localpressedKeysArrayMaj, __ATOMIC_RELAXED);
-                __atomic_store_n(&pressedKeysArrayMin, 0x0000, __ATOMIC_RELAXED);
+                localpressedKeysMin = 0;
+                __atomic_store_n(&pressedKeysMin, localpressedKeysMin, __ATOMIC_RELAXED);
+                __atomic_store_n(&pressedKeysMaj, 0x0000, __ATOMIC_RELAXED);
             }
             auto_detect(localwest_detect, localeast_detect);
             __atomic_store_n(&west_detect, localwest_detect, __ATOMIC_RELAXED);
         }
-
         if (localeast_detect != east_detect){
           if(receiver){
-            // reset pressedKeysArray
-            localpressedKeysArrayMaj = 0;
-            __atomic_store_n(&pressedKeysArrayMaj, localpressedKeysArrayMaj, __ATOMIC_RELAXED);
-            __atomic_store_n(&pressedKeysArrayMin, 0x0000, __ATOMIC_RELAXED);
+            localpressedKeysMin= 0;
+            __atomic_store_n(&pressedKeysMin, localpressedKeysMin, __ATOMIC_RELAXED);
+            __atomic_store_n(&pressedKeysMaj, 0x0000, __ATOMIC_RELAXED);
           }
           auto_detect(localwest_detect, localeast_detect);
           if(sender){
@@ -455,7 +458,8 @@ void scanKeysTask(void * pvParameters) {
           localvolume_r = Knob3.CurRotVal();
           localoctave_r = Knob2.CurRotVal();
           localwave_r = Knob1.CurRotVal();
-          //Store Knob info in the TX_Message
+
+          //Send Knob info to other modules if something changed
           if (!singleton && (localoctave_r != prevOctave || localvolume_r != prevVolume || localwave_r != prevWave)){
             TX_Message[0] = 'K';
             TX_Message[2] = localoctave_r;
@@ -528,7 +532,7 @@ void scanKeysTask(void * pvParameters) {
               for (uint8_t i = 0; i < 12; i++){
                 if (p_idx_array[i] != 12) {
                   //localstepsize = shift>0 ? stepSizes[p_idx_array[i]]<<shift : stepSizes[p_idx_array[i]]>>-shift;
-                  localpressedKeysArrayMaj |= (1<<p_idx_array[i]);
+                  localpressedKeysMin |= (1<<p_idx_array[i]);
                 }
                 else{
                   break;
@@ -564,7 +568,7 @@ void scanKeysTask(void * pvParameters) {
             }
           for (uint8_t i = 0; i < 12; i++){
             if (r_idx_array[i] != 12) {
-              localpressedKeysArrayMaj &= ~(1<<r_idx_array[i]);
+              localpressedKeysMin &= ~(1<<r_idx_array[i]);
             }
             else{
               break;
@@ -590,7 +594,7 @@ void scanKeysTask(void * pvParameters) {
       prevPressedKeys = onehot;
       // Serial.printf("Keys %hu\n",localpressedKeysArrayMaj);
       if (receiver){
-        __atomic_store_n(&pressedKeysArrayMaj, localpressedKeysArrayMaj, __ATOMIC_RELAXED);
+        __atomic_store_n(&pressedKeysMin, localpressedKeysMin, __ATOMIC_RELAXED);
         __atomic_store_n(&currentnote, localnote, __ATOMIC_RELAXED);
         __atomic_store_n(&currentsharp, localsharp, __ATOMIC_RELAXED);
         __atomic_store_n(&volume_r, localvolume_r, __ATOMIC_RELAXED);

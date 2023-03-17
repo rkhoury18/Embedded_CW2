@@ -27,8 +27,11 @@
   volatile char currentnote;
   volatile char currentsharp;
 
+  volatile uint8_t maxOct =8;
+
+
   volatile uint32_t pressedKeysMin = 0; // 12 bits for first pos 12 bits for second pos, 00000000
-  volatile uint16_t pressedKeysMaj = 0; // 12 bits for third pos, 0000
+  volatile uint32_t pressedKeysMaj = 0; // 12 bits for third pos, 0000
   SemaphoreHandle_t pressedKeysArrayMutex;
 
   //Keyboard connection values
@@ -56,7 +59,7 @@
   volatile uint8_t wave_s;
   volatile int32_t vout_s = 0;
   volatile uint32_t maj_s = 0;
-  volatile uint16_t min_s = 0;
+  volatile uint32_t min_s = 0;
 
 
   //Receiver variables
@@ -141,6 +144,7 @@ void auto_detect(bool west, bool east){
       xQueueSend(msgOutQ, TX_Message, 0);
     }
     else{
+      maxOct=8;
       singleton = true;
     }
   }
@@ -157,7 +161,7 @@ void sampleISR() {
   uint8_t vol;
   uint8_t wave;
   if(receiver){
-    pressedKeysArray = pressedKeysMaj << 24 | pressedKeysMin;
+    pressedKeysArray = ((((uint64_t)pressedKeysMaj) << 24) | pressedKeysMin);
     baseoct = octave_r - 4;
     vol = volume_r;
     wave = wave_r;
@@ -274,7 +278,14 @@ void recieverTask(){
     }
     else if(RX_Message[3] == 2){
       localpressedKeysMaj |= (1 << RX_Message[2]);
+      Serial.println ("Maj: "+String(localpressedKeysMaj));
     }
+  }
+  else if (RX_Message[0]='M'){
+    Serial.println ("Received maxOct: "+String(RX_Message[1]));
+    uint8_t localmaxOct = 8-RX_Message[1];
+    __atomic_store_n(&maxOct, localmaxOct,__ATOMIC_RELAXED);
+
   }
   // Serial.printf("keys recieved %hu\n", localpressedKeysArrayMaj);
   //Write step size to the pressedKeys array to play it
@@ -305,6 +316,11 @@ void senderTask(){
     //Send to other keyboards connected to get their position
     if(east_detect){
       uint8_t TX_Message[8] = {'H',pos, octave_s, volume_r, 0, 0, 0, 0};
+      xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+    }
+    else{
+      Serial.println("Here");
+      uint8_t TX_Message[8] = {'M',pos, 0, 0, 0, 0, 0, 0};
       xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
     }
   }
@@ -360,14 +376,22 @@ void CAN_TX_Task (void * pvParameters) {
 
 void sendSoundTask (void * pvParameters) {
   const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
+  uint64_t localPressedKeys;
   TickType_t xLastWakeTime = xTaskGetTickCount();
+  volatile uint64_t prevPressed = 0;
   while(1){
+    localPressedKeys = ((uint64_t)pressedKeysMaj) << 24 | pressedKeysMin;
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
-    if(receiver && !singleton){
-      uint8_t TX_Message[8] = {'V', pressedKeysMin, pressedKeysMin>>8, pressedKeysMin>>16, pressedKeysMaj>>8, pressedKeysMaj>>16, 0, 0};
+    if(receiver && !singleton && localPressedKeys != prevPressed){
+      uint8_t TX_Message[8] = {'V', (pressedKeysMin & 0xFF), (pressedKeysMin>>8 & 0xFF), (pressedKeysMin>>16 & 0xFF), (pressedKeysMaj & 0xFF), (pressedKeysMaj>>8 & 0xFF), 0, 0};
+      // Serial.println("Sending:"+String(pressedKeysMaj));
       xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
       // Serial.printf("Sending: %d\n", TX_Message[4]<<24 | TX_Message[3]<<16 | TX_Message[2]<<8 | TX_Message[1]);
     }
+    else {
+    }
+    prevPressed = localPressedKeys;
+
   }
 }
 
@@ -379,9 +403,6 @@ void scanKeysTask(void * pvParameters) {
     Knob Knob3(0,4);
     Knob Knob2(0,4);
     Knob Knob1 (0,0);
-    Knob3.SetLimits(0,8);
-    Knob2.SetLimits(0,8);
-    Knob1.SetLimits(0,3);
     uint16_t prevPressedKeys = 0;
     uint16_t pressedKeys = 0;
     uint8_t TX_Message[8] = {0};
@@ -390,6 +411,7 @@ void scanKeysTask(void * pvParameters) {
     uint8_t prevVolume = 4;
     uint8_t prevWave = 0;
     bool start = true;
+    uint8_t prevMaxOct = 0;
 
     while(1){
         vTaskDelayUntil( &xLastWakeTime, xFrequency );
@@ -400,6 +422,7 @@ void scanKeysTask(void * pvParameters) {
         uint8_t localoctave_r= octave_r;
         uint8_t localwave_r = wave_r;
         uint32_t localpressedKeysMin = pressedKeysMin;
+        uint32_t localpressedKeysMaj = pressedKeysMaj;
         uint8_t localkeyArray[7] = {0};
         //Get keys info
         for (uint8_t i = 0; i < 7; i++){
@@ -446,6 +469,12 @@ void scanKeysTask(void * pvParameters) {
             xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
           }
           __atomic_store_n(&east_detect, localeast_detect, __ATOMIC_RELAXED);
+        }
+        if (prevMaxOct != maxOct){
+              // Serial.println ("Setting max"+String(maxOct));
+              Knob3.SetLimits(0,8);
+              Knob2.SetLimits(0,maxOct);
+              Knob1.SetLimits(0,3);
         }
 
         if(receiver){
@@ -592,6 +621,8 @@ void scanKeysTask(void * pvParameters) {
         }
       }
       prevPressedKeys = onehot;
+      prevMaxOct = maxOct;
+      // Serial.printf("PressedKeys %hu\n",pressedKeysArray);
       // Serial.printf("Keys %hu\n",localpressedKeysArrayMaj);
       if (receiver){
         __atomic_store_n(&pressedKeysMin, localpressedKeysMin, __ATOMIC_RELAXED);
@@ -821,7 +852,7 @@ void setup() {
     "scanKeys",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    3,			/* Task priority */
+    2,			/* Task priority */
     &scanKeysHandle );  /* Pointer to store the task handle */
 
     TaskHandle_t displayUpdateTaskHandle = NULL;
@@ -839,7 +870,7 @@ void setup() {
     "decode",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    3,			/* Task priority */
+    2,			/* Task priority */
     &decodeTaskHandle);
 
     TaskHandle_t CAN_TX_TaskHandle = NULL;
@@ -848,7 +879,7 @@ void setup() {
     "CanTX",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    3,			/* Task priority */
+    2,			/* Task priority */
     &CAN_TX_TaskHandle);
 
     TaskHandle_t sendSoundTaskHandle = NULL;
@@ -857,7 +888,7 @@ void setup() {
     "sendSound",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    4,			/* Task priority */ 
+    2,			/* Task priority */ 
     &sendSoundTaskHandle);
   #endif
 

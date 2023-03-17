@@ -27,7 +27,7 @@
   volatile char currentnote;
   volatile char currentsharp;
 
-  volatile uint8_t maxOct =8;
+  volatile uint8_t maxOct = 8;
 
 
   volatile uint32_t pressedKeysMin = 0; // 12 bits for first pos 12 bits for second pos, 00000000
@@ -63,6 +63,8 @@
 
 
   //Receiver variables
+  volatile uint8_t volume_cur = 4;
+  volatile uint8_t octave_cur = 4;
   volatile uint8_t volume_r = 4;
   volatile uint8_t octave_r = 4;
   volatile uint8_t wave_r = 0;
@@ -99,6 +101,7 @@
   const int DRST_BIT = 4;
   const int HKOW_BIT = 5;
   const int HKOE_BIT = 6;
+
 
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
@@ -137,6 +140,8 @@ void auto_detect(bool west, bool east){
   if(!west){ //most west module
     pos = 0;
     receiver = true;
+    __atomic_store_n(&octave_r, octave_cur, __ATOMIC_RELAXED);
+    __atomic_store_n(&volume_r, volume_cur, __ATOMIC_RELAXED);
     sender = false;
     if(east){ // >=2 modules
       singleton = false;
@@ -167,7 +172,7 @@ void sampleISR() {
     wave = wave_r;
   }
   else if(sender){
-    pressedKeysArray = min_s << 24 | maj_s;
+    pressedKeysArray = ((uint64_t)min_s) << 24 | maj_s;
     baseoct = octave_s - pos - 4;
     vol = volume_s;
     wave = wave_s;
@@ -400,15 +405,15 @@ void scanKeysTask(void * pvParameters) {
     const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
     TickType_t xLastWakeTime = xTaskGetTickCount();
     // Classes initialisations and variables needed for task
-    Knob Knob3(0,4);
-    Knob Knob2(0,4);
+    Knob Knob3(0,volume_cur);
+    Knob Knob2(0,octave_cur);
     Knob Knob1 (0,0);
     uint16_t prevPressedKeys = 0;
     uint16_t pressedKeys = 0;
     uint8_t TX_Message[8] = {0};
     uint32_t reset[36] = {0};
-    uint8_t prevOctave = 4;
-    uint8_t prevVolume = 4;
+    uint8_t prevOctave = octave_cur;
+    uint8_t prevVolume = volume_cur;
     uint8_t prevWave = 0;
     bool start = true;
     uint8_t prevMaxOct = 0;
@@ -490,10 +495,13 @@ void scanKeysTask(void * pvParameters) {
 
           //Send Knob info to other modules if something changed
           if (!singleton && (localoctave_r != prevOctave || localvolume_r != prevVolume || localwave_r != prevWave)){
+            Serial.println ("cur octave: "+String(localoctave_r)+" cur volume: "+String(localvolume_r));
             TX_Message[0] = 'K';
             TX_Message[2] = localoctave_r;
             TX_Message[3] = localvolume_r;
             TX_Message[4] = localwave_r;
+            __atomic_store_n(&octave_cur, localoctave_r, __ATOMIC_RELAXED);
+            __atomic_store_n(&volume_cur, localvolume_r, __ATOMIC_RELAXED);
             xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
           }
         }

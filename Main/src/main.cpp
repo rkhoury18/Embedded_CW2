@@ -73,6 +73,7 @@ SemaphoreHandle_t sampleBufferMutex;
   volatile int32_t vout_s = 0;
   volatile uint32_t maj_s = 0;
   volatile uint32_t min_s = 0;
+  volatile bool en_ASDR_s = false;
 
 
   //Receiver variables
@@ -84,6 +85,7 @@ SemaphoreHandle_t sampleBufferMutex;
   volatile uint8_t D_r = 5;
   volatile uint8_t S_r = 1;
   volatile uint8_t R_r = 10;
+  volatile bool en_ASDR_r = false;
 
 
   volatile uint8_t keyArray[7];
@@ -295,6 +297,7 @@ void ISRTask(void *pvParameters) {
   uint8_t D;
   uint8_t S;
   uint8_t R;
+  bool ADSR_en;
   while (1) {
     xSemaphoreTake(sampleBufferMutex, portMAX_DELAY);
       for (uint32_t writeCtr = 0; writeCtr < SAMPLE_BUFFER_SIZE; writeCtr++) {
@@ -307,6 +310,7 @@ void ISRTask(void *pvParameters) {
           D = D_r;
           S = S_r;
           R = R_r;
+          ADSR_en = en_ASDR_r;
         }
         else if(sender){
           pressedKeysArray = ((uint64_t)min_s) << 24 | maj_s;
@@ -317,6 +321,7 @@ void ISRTask(void *pvParameters) {
           D = D_s;
           S = S_s;
           R = R_s;
+          ADSR_en = en_ASDR_s;
         }
           static uint32_t phaseAcc[36] = {0};
           static int increase[36] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
@@ -329,10 +334,17 @@ void ISRTask(void *pvParameters) {
                   phaseAcc[i] += step;
                   int32_t Vout = (phaseAcc[i] >> 24) - 128;
                   if((pressedKeysArray >> i) & 0x1){
-                    polyphony_vout += (Vout*ADSR(i,A,D,S,R,1) >> 24);
+                    if (ADSR_en){
+                      polyphony_vout += (Vout*ADSR(i,A,D,S,R,1) >> 24);
+                    }
+                    else{
+                      polyphony_vout += Vout;
+                    }
                   }
                   else{
-                    polyphony_vout += (Vout*ADSR(i,A,D,S,R,0) >> 24);
+                    if (ADSR_en){
+                      polyphony_vout += (Vout*ADSR(i,A,D,S,R,0) >> 24);
+                    }
                   }
                 }
                 break;
@@ -490,6 +502,7 @@ void senderTask(){
     octave_s = RX_Message[2] + pos;
     volume_s = RX_Message[3];
     wave_s = RX_Message[4];
+    en_ASDR_s = RX_Message[5];
   }
   //Voltage message to know what notes to play
   else if (RX_Message[0] == 'V'){
@@ -580,6 +593,7 @@ void scanKeysTask(void * pvParameters) {
     uint8_t prevD = 0;
     uint8_t prevS = 0;
     uint8_t prevR = 0;
+    bool prevEnADSR = false;
     bool start = true;
     uint8_t prevMaxOct = 0;
 
@@ -597,6 +611,8 @@ void scanKeysTask(void * pvParameters) {
         uint8_t localD_s = D_s;
         uint8_t localS_s = S_s;
         uint8_t localR_s = R_s;
+        bool localEnADSR_r = en_ASDR_r;
+        bool localEnADSR_s = en_ASDR_s;
         uint32_t localpressedKeysMin = pressedKeysMin;
         uint32_t localpressedKeysMaj = pressedKeysMaj;
         uint8_t localkeyArray[7] = {0};
@@ -661,20 +677,24 @@ void scanKeysTask(void * pvParameters) {
           uint8_t currentBA_3 = localkeyArray[3] & 0x03; //00000011 select last 2 bits
           uint8_t currentBA_2 = (localkeyArray[3] & 0x0C)>>2; //00001100 select 2 bits before last 2 bits and shift
           uint8_t currentBA_1 = localkeyArray[4] & 0x03; //00000011 select last 2 bits
+          bool curClick = (localkeyArray[5] & 0x02);
+          Knob3.UpdateClick(curClick);
           Knob3.UpdateRotateVal(currentBA_3);
           Knob2.UpdateRotateVal(currentBA_2);
           Knob1.UpdateRotateVal(currentBA_1);
           localvolume_r = Knob3.CurRotVal();
           localoctave_r = Knob2.CurRotVal();
           localwave_r = Knob1.CurRotVal();
+          localEnADSR_r = Knob3.curClickVal();
 
           //Send Knob info to other modules if something changed
-          if (!singleton && (localoctave_r != prevOctave || localvolume_r != prevVolume || localwave_r != prevWave)){
+          if (!singleton && (localoctave_r != prevOctave || localvolume_r != prevVolume || localwave_r != prevWave || localEnADSR_r != prevEnADSR)){
             // Serial.println ("cur octave: "+String(localoctave_r)+" cur volume: "+String(localvolume_r));
             TX_Message[0] = 'K';
             TX_Message[2] = localoctave_r;
             TX_Message[3] = localvolume_r;
             TX_Message[4] = localwave_r;
+            TX_Message[5] = localEnADSR_r;
             xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
           }
         }
@@ -710,6 +730,7 @@ void scanKeysTask(void * pvParameters) {
         prevS = localS_s;
         prevD = localD_s;
         prevA = localA_s;
+        prevEnADSR = localEnADSR_r;
         //Code for getting cords 
         //Variables needed for getting cords
         uint16_t onehot = pressedKeys^0xFFF;
@@ -858,6 +879,7 @@ void scanKeysTask(void * pvParameters) {
         
       }
       if (receiver){
+        __atomic_store_n(&en_ASDR_r, localEnADSR_r, __ATOMIC_RELAXED);
         __atomic_store_n(&pressedKeysMin, localpressedKeysMin, __ATOMIC_RELAXED);
         __atomic_store_n(&currentnote_r, localnote_r, __ATOMIC_RELAXED);
         __atomic_store_n(&currentsharp_r, localsharp_r, __ATOMIC_RELAXED);

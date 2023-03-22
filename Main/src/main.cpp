@@ -13,8 +13,8 @@
 //#define TEST_DISPLAY_UPDATE
 #define SAMPLE_BUFFER_SIZE 128
 //Variable neede for Double Buffer 
-uint8_t sampleBuffer0[SAMPLE_BUFFER_SIZE];
-uint8_t sampleBuffer1[SAMPLE_BUFFER_SIZE];
+uint8_t sampleBuffer0[SAMPLE_BUFFER_SIZE] = {0};
+uint8_t sampleBuffer1[SAMPLE_BUFFER_SIZE] = {0};
 volatile bool writeBuffer1 = false;
 SemaphoreHandle_t sampleBufferMutex;
 
@@ -63,10 +63,10 @@ SemaphoreHandle_t sampleBufferMutex;
   //Sender variables
   volatile uint8_t octave_s;
   volatile uint8_t volume_s;
-  volatile uint8_t A_s = 10;
-  volatile uint8_t D_s = 10;
-  volatile uint8_t S_s = 1;
-  volatile uint8_t R_s = 20;
+  volatile uint8_t A_s = 128;
+  volatile uint8_t D_s = 128;
+  volatile uint8_t S_s = 200;
+  volatile uint8_t R_s = 128;
   volatile uint8_t wave_s;
   volatile int32_t vout_s = 0;
   volatile uint32_t maj_s = 0;
@@ -78,11 +78,10 @@ SemaphoreHandle_t sampleBufferMutex;
   volatile uint8_t octave_r = 4;
   volatile uint8_t wave_r = 0;
   volatile int32_t vout_r = 0;
-  volatile uint8_t A_r = 5;
-  volatile uint8_t D_r = 5;
-  volatile uint8_t S_r = 1;
-  volatile uint8_t R_r = 10;
-
+  volatile uint8_t A_r = 128;
+  volatile uint8_t D_r = 128;
+  volatile uint8_t S_r = 200;
+  volatile uint8_t R_r = 128;
 
   volatile uint8_t keyArray[7];
   SemaphoreHandle_t keyArrayMutex;
@@ -153,20 +152,24 @@ volatile uint32_t t_r[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 volatile uint32_t t_s[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
 uint32_t ADSR(uint8_t i, uint8_t A, uint8_t D, uint8_t S, uint8_t R, bool pressed){ 
-  uint32_t SECONDS = 10000;
+  uint64_t SECONDS = 20000;
   if (receiver){
       // Serial.printf("%d", t_r[i]);     // xSemaphoreTake(tvarMutex_r, portMAX_DELAY);
       uint32_t time = 0;
       bool ADS = true;
       if(pressed){
         // Serial.println("HERE1");
-        time = t_r[i]++;
-        
+        if(time < ((A*3*SECONDS)>>8) + ((D*2*SECONDS)>>8)){
+          time = t_r[i]++; //attack and decay
+        } 
+        else{
+          time = t_r[i]; //sustain
+        }
       }
       else if(t_r[i]){
-        if(t_r[i] <= 0xFFFFFFFF - R*SECONDS){
+        if(t_r[i] <= 0xFFFFFFFF - ((R*10*SECONDS) >> 8)){
           // Serial.println("HERE2");
-          t_r[i] = 0xFFFFFFFF - R*SECONDS;
+          t_r[i] = 0xFFFFFFFF - ((R*10*SECONDS) >> 8);
         }
         time = t_r[i]++;
         ADS = false;
@@ -177,24 +180,24 @@ uint32_t ADSR(uint8_t i, uint8_t A, uint8_t D, uint8_t S, uint8_t R, bool presse
         if (time == 0){
             scale = 0;
         }
-        else if ((time < A*SECONDS) && ADS){ //Attack envelope
+        else if ((time < ((A*3*SECONDS)>>8)) && ADS){ //Attack envelope
           // Serial.printf("Attacking\n");
-            scale = (16777216/(A*SECONDS))*time;
+            scale = (16777216/((A*3*SECONDS)>>8))*time;
         }
             
-        else if ((time < ((A + D)*SECONDS)) && ADS){ //Decay envelope
+        else if ((time < ((A*3*SECONDS)>>8) + ((D*2*SECONDS)>>8)) && ADS){ //Decay envelope
           //  Serial.printf("Decaying\n");
-            scale = 16777216 - ((16777216 - (204 << 16))/(D*SECONDS))*(time-A*SECONDS);
+            scale = 16777216 - ((16777216 - (S << 16))/((D*2*SECONDS)>>8))*(time - ((A*3*SECONDS)>>8));
         }
             
         else if (ADS){ //Sustain envelope
           // Serial.printf("Sustaining\n");
-            scale = 204 << 16;
+            scale = S << 16;
         }
             
         else{
           //  Serial.printf("Releasing\n");
-          scale = (204 << 16) - (((204 << 16)/R*SECONDS)*time);
+          scale = (S << 16) - (((S << 16)/((R*10*SECONDS) >> 8))*(time-(0xFFFFFFFF - ((R*10*SECONDS) >> 8))));
         } //Release envelope
         // scale_r[i] += 200;
         //xSemaphoreGive(tvarMutex_r);
@@ -225,7 +228,6 @@ uint32_t ADSR(uint8_t i, uint8_t A, uint8_t D, uint8_t S, uint8_t R, bool presse
           t_s[i]++;
         return scale_s[i];
   }
-
 }
 
 void auto_detect(bool west, bool east){
@@ -259,9 +261,9 @@ void sampleISR() {
       }
 	
     if (writeBuffer1)
-      analogWrite(OUTR_PIN, sampleBuffer0[readCtr++]);
+      analogWrite(OUTR_PIN, sampleBuffer0[readCtr++] + 128);
     else
-      analogWrite(OUTR_PIN, sampleBuffer1[readCtr++]);
+      analogWrite(OUTR_PIN, sampleBuffer1[readCtr++] + 128);
 }
 
 void ISRTask(void *pvParameters) {
@@ -305,13 +307,17 @@ void ISRTask(void *pvParameters) {
                   int8_t shift = baseoct + (uint8_t)(i/12);
                   uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
                   phaseAcc[i] += step;
-                  int32_t Vout = (phaseAcc[i] >> 24) - 128;
+                  // int32_t Vout = (phaseAcc[i] >> 24) - 128;
+                  int32_t Vout = 127;
                   if((pressedKeysArray >> i) & 0x1){
-                    polyphony_vout += (Vout*ADSR(i,A,D,S,R,1) >> 24);
+                    uint32_t scale = ADSR(i,A,D,S,R,1);
+                    polyphony_vout += (Vout*scale >> 24);
                   }
                   else{
-                    polyphony_vout += (Vout*ADSR(i,A,D,S,R,0) >> 24);
+                    uint32_t scale = ADSR(i,A,D,S,R,0);
+                    polyphony_vout += (Vout*scale>> 24);
                   }
+                  // Serial.printf("%d\n",polyphony_vout);
                 }
                 break;
               case 1 : //Triangle
@@ -381,13 +387,12 @@ void ISRTask(void *pvParameters) {
           }
           polyphony_vout = polyphony_vout >> (8 - vol);
           polyphony_vout = max(-128, min(127, (int)polyphony_vout));
-            uint32_t lol = polyphony_vout;//Calculate one sample
+          uint32_t lol = polyphony_vout;//Calculate one sample
+          // Serial.printf("ctr %d, val %d\n ", writeCtr, sampleBuffer0[writeCtr]);
             if (writeBuffer1)
-              sampleBuffer1[writeCtr] = lol + 128;
+              sampleBuffer1[writeCtr] = lol;
             else
-              sampleBuffer0[writeCtr] = lol + 128;
-            
-            vout_r = polyphony_vout;
+              sampleBuffer0[writeCtr] = lol;
       }
   }
 }

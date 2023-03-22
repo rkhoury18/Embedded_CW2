@@ -201,29 +201,49 @@ uint32_t ADSR(uint8_t i, uint8_t A, uint8_t D, uint8_t S, uint8_t R, bool presse
         return scale;
   }
   if (sender){
-    static uint32_t scale_s[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-        if (t_s[i] == 0)
-            scale_s[i] = 0;
+    uint32_t time = 0;
+      bool ADS = true;
+      if(pressed){
+        // Serial.println("HERE1");
+        time = t_s[i]++;
+        
+      }
+      else if(t_s[i]){
+        if(t_s[i] <= 0xFFFFFFFF - R*SECONDS){
+          // Serial.println("HERE2");
+          t_s[i] = 0xFFFFFFFF - R*SECONDS;
+        }
+        time = t_s[i]++;
+        ADS = false;
+      }
+      // xSemaphoreGive(tvarMutex_r);
+        // // Serial.printf("time instance: %d\n", t_r[i]);
+        uint64_t scale;
+        if (time == 0){
+            scale = 0;
+        }
+        else if ((time < A*SECONDS) && ADS){ //Attack envelope
+          // Serial.printf("Attacking\n");
+            scale = (16777216/(A*SECONDS))*time;
+        }
             
-        else if (t_s[i] < ((A*9 * 22000) >> 8)) //Attack envelope
-            scale_s[i] += 84*(256/(A));
+        else if ((time < ((A + D)*SECONDS)) && ADS){ //Decay envelope
+          //  Serial.printf("Decaying\n");
+            scale = 16777216 - ((16777216 - (204 << 16))/(D*SECONDS))*(time-A*SECONDS);
+        }
             
-        else if (t_s[i] == ((A*9 * 22000) >> 8)) //Attack peak
-            scale_s[i] = 16777215;
+        else if (ADS){ //Sustain envelope
+          // Serial.printf("Sustaining\n");
+            scale = 204 << 16;
+        }
             
-        else if (t_s[i] < (((A*9 + D*76)*22000) >> 8)) //Decay envelope
-            scale_s[i] =- (16777216 - (204 << 16))/(22000*76) * (256/(D_s));
-            
-        else if (t_s[i] < (((A*9 + D*76 + S*46)*22000) >> 8)) //Sustain envelope
-            scale_s[i] = 204 << 16;
-            
-        else if (t_s[i] < (((A*9 + D*76 + S*46 + R*60)*22000) >> 8)) //Release envelope
-            scale_s[i] -= (204 << 16)/(22000*60) * (256/(R));
-            
-        else
-            scale_s[i] = 0;
-          t_s[i]++;
-        return scale_s[i];
+        else{
+          //  Serial.printf("Releasing\n");
+          scale = (204 << 16) - (((204 << 16)/R*SECONDS)*time);
+        } //Release envelope
+        // scale_r[i] += 200;
+        //xSemaphoreGive(tvarMutex_r);
+        return scale;
   }
 
 }
@@ -968,40 +988,77 @@ void displayUpdateTask(void * pvParameters){
     }
 
     if (sender){
-      u8g2.drawStr(80,8,"A:");
-      u8g2.drawStr(80,18,"D:");
-      u8g2.drawStr(80,28,"S:");
-      u8g2.drawStr(110,8,"R:");
-      u8g2.drawStr(2, 15,"Vol:");
-      u8g2.drawStr(2, 23,"Oct:");
-      u8g2.setCursor(87,8);
+
+      u8g2.drawStr(2, 32,"A");
+      u8g2.drawStr(44, 32, "D");
+      u8g2.drawStr(85, 32, "S");
+      u8g2.drawStr(122, 32, "R");
+
+      u8g2.setCursor(2,24);
       u8g2.print(A_s,DEC);
-      u8g2.setCursor(87,18);
+
+      u8g2.setCursor(44,24);
       u8g2.print(D_s,DEC);
-      u8g2.setCursor(87,28);
+
+      u8g2.setCursor(85,24);
       u8g2.print(S_s,DEC);
-      u8g2.setCursor(120,8);
+
+      u8g2.setCursor(122,24);
       u8g2.print(R_s,DEC);
-      // u8g2.drawStr(2, 6,"Note:");
-      u8g2.setCursor(35,10);
-      // u8g2.print(currentnote);
-      // u8g2.print(currentsharp);
-      u8g2.setCursor(25,16);
-      if (volume_s==8){
-        u8g2.drawStr(33, 15,"max");
-      }
-      else if (volume_s==0){
-          u8g2.drawStr(33, 15,"min");
-      }
-      u8g2.print(volume_s,DEC);
-      u8g2.setCursor(25,24);
-      if (octave_s==8){
-        u8g2.drawStr(33, 23,"max");
-      }
-      else if (octave_s==0){
-          u8g2.drawStr(33, 23,"min");
-      }
-      u8g2.print(octave_s,DEC);
+
+
+      int attackEnd = map(A_s, 0, 255, 0, 40);
+      int decayEnd = map(D_s, 0, 255, 0, 15);
+      int sustainEnd = map(S_s, 0, 255, 0, 15);
+      int releaseEnd = map(R_s, 0, 255, 0, 40);
+      Serial.println(attackEnd);
+      Serial.println(decayEnd);
+      Serial.println(sustainEnd);
+      Serial.println(releaseEnd);
+
+      // Draw the ADSR envelope
+      u8g2.drawLine(45, 15, attackEnd+45, 2);  // Attack segment
+      u8g2.drawLine(attackEnd+45, 2,(attackEnd+45)+ decayEnd, 2 + sustainEnd);  // Decay segment
+      u8g2.drawLine((attackEnd+45)+ decayEnd, 2 + sustainEnd, 80, 2 + sustainEnd);  // Sustain segment
+      u8g2.drawLine(80, 2+sustainEnd, 80+releaseEnd, 15);  // Release segment
+
+      // u8g2.drawLine(45,15,55,2);
+      // u8g2.drawLine(55,2,60,9);
+      // u8g2.drawLine(60,9,75,9);
+      // u8g2.drawLine(75,9,83,15);
+
+
+      // u8g2.drawStr(80,8,"A:");
+      // u8g2.drawStr(80,18,"D:");
+      // u8g2.drawStr(80,28,"S:");
+      // u8g2.drawStr(110,8,"R:");
+      // u8g2.drawStr(2, 15,"Vol:");
+      // u8g2.drawStr(2, 23,"Oct:");
+      // u8g2.setCursor(87,8);
+      // u8g2.print(A_s,DEC);
+      // u8g2.setCursor(87,18);
+      // u8g2.print(D_s,DEC);
+      // u8g2.setCursor(87,28);
+      // u8g2.print(S_s,DEC);
+      // u8g2.setCursor(120,8);
+      // u8g2.print(R_s,DEC);
+      // u8g2.setCursor(35,10);
+      // u8g2.setCursor(25,16);
+      // if (volume_s==8){
+      //   u8g2.drawStr(33, 15,"max");
+      // }
+      // else if (volume_s==0){
+      //     u8g2.drawStr(33, 15,"min");
+      // }
+      // u8g2.print(volume_s,DEC);
+      // u8g2.setCursor(25,24);
+      // if (octave_s==8){
+      //   u8g2.drawStr(33, 23,"max");
+      // }
+      // else if (octave_s==0){
+      //     u8g2.drawStr(33, 23,"min");
+      // }
+      // u8g2.print(octave_s,DEC);
 
     }
 

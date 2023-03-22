@@ -241,10 +241,10 @@ void ISRTask(void *pvParameters) {
                   if((pressedKeysArray >> i) & 0x1){
                     phaseAcc[i] += step;
                     if (phaseAcc[i] < 2147483648) {
-                        int32_t Vout = ((2147483648 << 1) >> 24) - 128;
+                        int32_t Vout = ((phaseAcc[i] << 1) >> 24) - 128;
                         polyphony_vout += Vout;
                     } else {
-                        uint64_t tmp = (-(2147483648 << 1)) + (8589934591);
+                        uint64_t tmp = (-(phaseAcc[i] << 1)) + (8589934591);
                         int32_t Vout = ((tmp >> 24) - 128) << 32;
                         polyphony_vout += Vout;
                     }

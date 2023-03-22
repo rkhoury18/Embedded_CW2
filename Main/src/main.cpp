@@ -11,6 +11,13 @@
 //#define DISABLE_THREADS
 //#define TEST_SCAN_KEYS
 //#define TEST_DISPLAY_UPDATE
+//#define TEST_DECODE
+//#define TEST_CAN_TX
+//#define TEST_CAN_RX_ISR
+//#define TEST_CAN_TX_ISR
+//#define TEST_ISRTASK
+//#define TEST_SAMPLEISR
+//#define TEST_SEND_SOUND
 #define SAMPLE_BUFFER_SIZE 128
 //Variable neede for Double Buffer 
 uint8_t sampleBuffer0[SAMPLE_BUFFER_SIZE];
@@ -163,6 +170,7 @@ void auto_detect(bool west, bool east){
 }
 
 void sampleISR() {
+  #ifdef TEST_SAMPLEISR
   static uint32_t readCtr = 0;
     if (readCtr == SAMPLE_BUFFER_SIZE) {
       readCtr = 0;
@@ -174,9 +182,24 @@ void sampleISR() {
       analogWrite(OUTR_PIN, sampleBuffer0[readCtr++]);
     else
       analogWrite(OUTR_PIN, sampleBuffer1[readCtr++]);
+  #else
+    static uint32_t readCtr = 0;
+    if (readCtr == SAMPLE_BUFFER_SIZE) {
+      readCtr = 0;
+      writeBuffer1 = !writeBuffer1;
+      xSemaphoreGiveFromISR(sampleBufferMutex, NULL);
+      }
+	
+    if (writeBuffer1)
+      analogWrite(OUTR_PIN, sampleBuffer0[readCtr++]);
+    else
+      analogWrite(OUTR_PIN, sampleBuffer1[readCtr++]);
+  #endif
+
 }
 
 void ISRTask(void *pvParameters) {
+  #ifndef TEST_ISRTASK
   uint64_t pressedKeysArray = 0;
   uint8_t baseoct;
   uint8_t vol;
@@ -267,6 +290,96 @@ void ISRTask(void *pvParameters) {
             vout_r = polyphony_vout;
       }
   }
+  #else
+      uint64_t pressedKeysArray = 0;
+      uint8_t baseoct;
+      uint8_t vol;
+      uint8_t wave;
+      xSemaphoreTake(sampleBufferMutex, portMAX_DELAY);
+      for (uint32_t writeCtr = 0; writeCtr < SAMPLE_BUFFER_SIZE; writeCtr++) {
+        if(receiver){
+          pressedKeysArray = ((((uint64_t)pressedKeysMaj) << 24) | pressedKeysMin);
+          baseoct = octave_r - 4;
+          vol = volume_r;
+          wave = wave_r;
+        }
+        else if(sender){
+          pressedKeysArray = ((uint64_t)min_s) << 24 | maj_s;
+          baseoct = octave_s - pos - 4;
+          vol = volume_s;
+          wave = wave_s;
+        }
+          static uint32_t phaseAcc[36] = {0};
+          static int increase[36] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
+          int32_t polyphony_vout = 0;
+          switch (wave){
+              case 0 :  //Sawtooth
+                for (uint8_t i=0; i<36;i++){
+                  int8_t shift = baseoct + (uint8_t)(i/12);
+                  uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
+                  if((pressedKeysArray >> i) & 0x1){
+                    phaseAcc[i] += step;
+                    int32_t Vout = ((phaseAcc[i] >> 24) - 128);
+                    polyphony_vout += Vout;
+                  }
+                }
+                break;
+              case 1 : //Triangle
+                for (uint8_t i=0; i<36;i++){
+                  int8_t shift = baseoct + (uint8_t)(i/12);
+                  uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
+                  if((pressedKeysArray >> i) & 0x1){
+                    phaseAcc[i] += step;
+                    if (phaseAcc[i] < 2147483648) {
+                        int32_t Vout = ((2147483648 << 1) >> 24) - 128;
+                        polyphony_vout += Vout;
+                    } else {
+                        uint64_t tmp = (-(2147483648 << 1)) + (8589934591);
+                        int32_t Vout = ((tmp >> 24) - 128) << 32;
+                        polyphony_vout += Vout;
+                    }
+                  }
+                }
+                break;
+              case 2 : //Square
+                for (uint8_t i=0; i<36;i++){
+                  int8_t shift = baseoct + (uint8_t)(i/12);
+                  uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
+                  if((pressedKeysArray >> i) & 0x1){
+                    phaseAcc[i] += step;
+                    if (phaseAcc[i] < 2147483648) {
+                        int32_t Vout = 127;
+                        polyphony_vout += Vout;
+                    } else {
+                        int32_t Vout = -128;
+                        polyphony_vout += Vout;
+                    }
+                  }
+                }
+                break;
+              case 3 : //Sine
+                for (uint8_t i=0; i<36;i++){
+                  int8_t shift = baseoct + (uint8_t)(i/12);
+                  uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
+                  if((pressedKeysArray >> i) & 0x1){
+                    phaseAcc[i] += step;
+                    int32_t Vout = (sineTable[phaseAcc[i] >> 22] >> 24) - 128;
+                    polyphony_vout += Vout;
+                  }
+                }
+                break;
+          }
+          polyphony_vout = polyphony_vout >> (8 - vol);
+          polyphony_vout = max(-128, min(127, (int)polyphony_vout));
+            uint32_t lol = polyphony_vout;//Calculate one sample
+            if (writeBuffer1)
+              sampleBuffer1[writeCtr] = lol + 128;
+            else
+              sampleBuffer0[writeCtr] = lol + 128;
+            
+            vout_r = polyphony_vout;
+      }
+    #endif
 }
 
 void recieverTask(){
@@ -350,6 +463,7 @@ void senderTask(){
 
 
 void decodeTask(void * pvParameters){
+  #ifndef TEST_DECODE
   while(1){
   xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
     if(receiver){
@@ -359,31 +473,60 @@ void decodeTask(void * pvParameters){
       senderTask();
     }
   }
-}
+  #else
+  xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+    if(receiver){
+      recieverTask();
+    }
+    else if(sender){
+      senderTask();
+    }
+    #endif
+  } 
+
 
 
 void CAN_RX_ISR (void) {
+  #ifndef TEST_CAN_RX_ISR
 	uint8_t RX_Message_ISR[8];
 	uint32_t ID;
 	CAN_RX(ID, RX_Message_ISR);
 	xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
+  #else
+    uint8_t RX_Message_ISR[8];
+	  uint32_t ID;
+    CAN_RX(ID, RX_Message_ISR);
+    xQueueSendFromISR(msgInQ, RX_Message_ISR, NULL);
+  #endif
 }
 
 void CAN_TX_ISR (void) {
+  #ifndef TEST_CAN_TX_ISR
 	xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
+  #else
+    xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
+  #endif
+
 }
 
 void CAN_TX_Task (void * pvParameters) {
+  #ifndef TEST_CAN_TX
 	uint8_t msgOut[8];
 	while (1) {
     xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
     xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
     CAN_TX(0x123, msgOut);
 	}
+  #else
+    xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
+    xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
+    CAN_TX(0x123, msgOut);
+  #endif
 }
 
 
 void sendSoundTask (void * pvParameters) {
+  #ifndef TEST_SEND_SOUND
   const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   uint64_t localPressedKeys;
   TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -400,8 +543,20 @@ void sendSoundTask (void * pvParameters) {
     else {
     }
     prevPressed = localPressedKeys;
-
   }
+  #else
+    uint64_t localPressedKeys;
+    localPressedKeys = ((uint64_t)pressedKeysMaj) << 24 | pressedKeysMin;
+    if(receiver && !singleton && localPressedKeys != prevPressed){
+      uint8_t TX_Message[8] = {'V', (pressedKeysMin & 0xFF), (pressedKeysMin>>8 & 0xFF), (pressedKeysMin>>16 & 0xFF), (pressedKeysMaj & 0xFF), (pressedKeysMaj>>8 & 0xFF), 0, 0};
+      // Serial.println("Sending:"+String(pressedKeysMaj));
+      xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+      // Serial.printf("Sending: %d\n", TX_Message[4]<<24 | TX_Message[3]<<16 | TX_Message[2]<<8 | TX_Message[1]);
+    }
+    else {
+    }
+    prevPressed = localPressedKeys;
+  #endif
 }
 
 void scanKeysTask(void * pvParameters) {
@@ -710,7 +865,6 @@ void scanKeysTask(void * pvParameters) {
   #endif
 }
 
-// Rhea Task: Fix max and min printing once Andy adds it
 void displayUpdateTask(void * pvParameters){
   #ifndef TEST_DISPLAY_UPDATE
   const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
@@ -814,32 +968,101 @@ void displayUpdateTask(void * pvParameters){
     digitalToggle(LED_BUILTIN);
   }
   #else
-   for (uint8_t idx = 0; idx < 1; idx++){
     u8g2.clearBuffer();         // clear the internal memory
-    u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
-    u8g2.setCursor(2,10);
-    xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
-    u8g2.print(idx,HEX);
-    u8g2.print(idx,HEX);
-    u8g2.print(idx,HEX);
-    xSemaphoreGive(keyArrayMutex);
-    u8g2.setCursor(2,20);
-    u8g2.print(idx,DEC);
-    u8g2.setCursor(10,20);
-    u8g2.print(idx,DEC);
-    u8g2.setCursor(2,30);
-    u8g2.print((char)(idx+65));
-    u8g2.print((char)(idx+65));
+    u8g2.setFont(u8g2_font_courB08_tr); // choose a suitable font
+    // u8g2.setCursor(100,20);
+    // u8g2.print(pos,DEC);
+    if (receiver){
+      uint8_t x, y;
+      u8g2.drawStr(80,8,"Wave(K2):");
+      u8g2.drawStr(2, 15,"Vol(K4):");
+      u8g2.drawStr(2, 23,"Oct(K3):");
+      u8g2.drawStr(2, 6,"Note:");
+      u8g2.drawStr(2, 32, "K1");  
+      u8g2.drawStr(39, 32, "K2");
+      u8g2.drawStr(80, 32, "K3");
+      u8g2.drawStr(116, 32, "K4");
+      u8g2.setCursor(2,2);
+      switch (wave_r){
+        case 0:
+              u8g2.drawLine(82,20,100,10);
+              u8g2.drawLine(100,10,100,20);
+              u8g2.drawLine(100,20,118,10);
+              u8g2.drawLine(118,10,118,20);
+              break;
+        case 1:
+              u8g2.drawLine(82,20,90,10);
+              u8g2.drawLine(90,10,98,20);
+              u8g2.drawLine(98,20,106,10);
+              u8g2.drawLine(106,10,114,20);
+              break;
+        case 2:
+              u8g2.drawLine(82,20,90,20);
+              u8g2.drawLine(90,20,90,10);
+              u8g2.drawLine(90,10,100,10);
+              u8g2.drawLine(100,10,100,20);
+              u8g2.drawLine(100,20,110,20);
+              u8g2.drawLine(110,20,110,10);
+              u8g2.drawLine(110,10,120,10);
+              u8g2.drawLine(120,10,120,20);
+              break;
+        case 3: 
+              for (x = 0; x < 40; x++) {
+                y = 32 + 6 * sin(2 * PI * x / 40);
+                u8g2.drawPixel(x+80, y-15);
+              }
+              break;
+      }
+      u8g2.setCursor(32,6);
+      u8g2.print(currentnote);
+      u8g2.print(currentsharp);
+      u8g2.setCursor(50,16);
+      if (volume_r==8){
+        u8g2.drawStr(58, 15,"max");
+      }
+      else if (volume_r==0){
+          u8g2.drawStr(58, 15,"min");
+      }
+      u8g2.print(volume_r,DEC);
+      u8g2.setCursor(50,24);
+      if (octave_r==8){
+        u8g2.drawStr(58, 23,"max");
+      }
+      else if (octave_r==0){
+          u8g2.drawStr(58, 23,"min");
+      }
+      u8g2.print(octave_r,DEC);
+    }
 
-    u8g2.setCursor(66,30);
-    u8g2.print((char) (idx+65));
-    u8g2.print(idx);
-    u8g2.print(idx);
+    if (sender){
+      u8g2.drawStr(2, 15,"Vol:");
+      u8g2.drawStr(2, 23,"Oct:");
+      // u8g2.drawStr(2, 6,"Note:");
+      u8g2.setCursor(35,10);
+      // u8g2.print(currentnote);
+      // u8g2.print(currentsharp);
+      u8g2.setCursor(25,16);
+      if (volume_s==8){
+        u8g2.drawStr(33, 15,"max");
+      }
+      else if (volume_s==0){
+          u8g2.drawStr(33, 15,"min");
+      }
+      u8g2.print(volume_s,DEC);
+      u8g2.setCursor(25,24);
+      if (octave_s==8){
+        u8g2.drawStr(33, 23,"max");
+      }
+      else if (octave_s==0){
+          u8g2.drawStr(33, 23,"min");
+      }
+      u8g2.print(octave_s,DEC);
+
+    }
 
     u8g2.sendBuffer();          
     //Toggle LED
     digitalToggle(LED_BUILTIN);
-  }
 
   #endif
 }

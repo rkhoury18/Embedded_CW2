@@ -199,13 +199,13 @@ void ISRTask(void *pvParameters) {
           static uint32_t phaseAcc[36] = {0};
           static int increase[36] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
           int32_t polyphony_vout = 0;
-          phaseAcc[i] += step;
           switch (wave){
               case 0 :  //Sawtooth
                 for (uint8_t i=0; i<36;i++){
                   int8_t shift = baseoct + (uint8_t)(i/12);
                   uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
                   if((pressedKeysArray >> i) & 0x1){
+                    phaseAcc[i] += step;
                     int32_t Vout = ((phaseAcc[i] >> 24) - 128);
                     polyphony_vout += Vout;
                   }
@@ -216,12 +216,13 @@ void ISRTask(void *pvParameters) {
                   int8_t shift = baseoct + (uint8_t)(i/12);
                   uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
                   if((pressedKeysArray >> i) & 0x1){
-                    if (phaseAcc < 2147483648) {
+                    phaseAcc[i] += step;
+                    if (phaseAcc[i] < 2147483648) {
                         int32_t Vout = ((2147483648 << 1) >> 24) - 128;
                         polyphony_vout += Vout;
                     } else {
                         uint64_t tmp = (-(2147483648 << 1)) + (8589934591);
-                        int32_t Vout = (tmp >> 24) - 128;
+                        int32_t Vout = ((tmp >> 24) - 128) << 32;
                         polyphony_vout += Vout;
                     }
                   }
@@ -232,7 +233,8 @@ void ISRTask(void *pvParameters) {
                   int8_t shift = baseoct + (uint8_t)(i/12);
                   uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
                   if((pressedKeysArray >> i) & 0x1){
-                    if (phaseAcc < 2147483648) {
+                    phaseAcc[i] += step;
+                    if (phaseAcc[i] < 2147483648) {
                         int32_t Vout = 127;
                         polyphony_vout += Vout;
                     } else {
@@ -247,6 +249,7 @@ void ISRTask(void *pvParameters) {
                   int8_t shift = baseoct + (uint8_t)(i/12);
                   uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
                   if((pressedKeysArray >> i) & 0x1){
+                    phaseAcc[i] += step;
                     int32_t Vout = (sineTable[phaseAcc[i] >> 22] >> 24) - 128;
                     polyphony_vout += Vout;
                   }

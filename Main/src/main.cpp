@@ -216,24 +216,15 @@ void ISRTask(void *pvParameters) {
                   int8_t shift = baseoct + (uint8_t)(i/12);
                   uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
                   if((pressedKeysArray >> i) & 0x1){
-                    if (increase[i] == 1) {
-                      if (phaseAcc[i] + 2*step >= phaseAcc[i]){
-                        phaseAcc[i] += 2*step;
-                      }
-                      else{
-                        increase[i] = -1;
-                      }
+                    phaseAcc[i] += step;
+                    if (phaseAcc[i] < 2147483648) {
+                        int32_t Vout = ((2147483648 << 1) >> 24) - 128;
+                        polyphony_vout += Vout;
+                    } else {
+                        uint64_t tmp = (-(2147483648 << 1)) + (8589934591);
+                        int32_t Vout = ((tmp >> 24) - 128) << 32;
+                        polyphony_vout += Vout;
                     }
-                    else {
-                      if ((phaseAcc[i] - 2*step) <= phaseAcc[i]){
-                        phaseAcc[i] -= 2*step;
-                      }
-                      else{
-                        increase[i] = 1;
-                      } 
-                    }
-                    int32_t Vout = ((phaseAcc[i] >> 24) - 128);
-                    polyphony_vout += Vout;
                   }
                 }
                 break;
@@ -242,24 +233,14 @@ void ISRTask(void *pvParameters) {
                   int8_t shift = baseoct + (uint8_t)(i/12);
                   uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
                   if((pressedKeysArray >> i) & 0x1){
-                    if (increase[i] == 1) {
-                      if ((phaseAcc[i] + 2*step) >= phaseAcc[i]){
-                        phaseAcc[i] += 2*step;
-                      }
-                      else{
-                        increase[i] = -1;
-                      }
+                    phaseAcc[i] += step;
+                    if (phaseAcc[i] < 2147483648) {
+                        int32_t Vout = 127;
+                        polyphony_vout += Vout;
+                    } else {
+                        int32_t Vout = -128;
+                        polyphony_vout += Vout;
                     }
-                    else {
-                      if ((phaseAcc[i] - 2*step) <= phaseAcc[i]){
-                        phaseAcc[i] -= 2*step;
-                      }
-                      else{
-                        increase[i] = 1;
-                      }
-                    }
-                    int32_t Vout = (increase[i] == 1) ? 127 : -128;
-                    polyphony_vout += Vout;
                   }
                 }
                 break;

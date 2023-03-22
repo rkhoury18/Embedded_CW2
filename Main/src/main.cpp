@@ -177,18 +177,14 @@ uint32_t ADSR(uint8_t i, uint8_t A, uint8_t D, uint8_t S, uint8_t R, bool presse
         if (time == 0){
             scale = 0;
         }
-        else if (time < ((A*SECONDS)) && ADS){ //Attack envelope
+        else if ((time < A*SECONDS) && ADS){ //Attack envelope
           // Serial.printf("Attacking\n");
-            scale = 84*(256/(A))*time;
+            scale = (16777216/(A*SECONDS))*time;
         }
             
-        else if (time == ((A*SECONDS)) && ADS){ //Attack peak
-            scale= 16777215;
-        }
-            
-        else if (time < (((A + D)*SECONDS)) && ADS){ //Decay envelope
+        else if ((time < ((A + D)*SECONDS)) && ADS){ //Decay envelope
           //  Serial.printf("Decaying\n");
-            scale = 16777215 - ((16777215 - (204 << 16))/(D*SECONDS))*time;
+            scale = 16777216 - ((16777216 - (204 << 16))/(D*SECONDS))*(time-A*SECONDS);
         }
             
         else if (ADS){ //Sustain envelope

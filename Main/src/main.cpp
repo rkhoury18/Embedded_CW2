@@ -31,8 +31,10 @@ SemaphoreHandle_t sampleBufferMutex;
 //global variables  
 
   //Current note being printed
-  volatile char currentnote;
-  volatile char currentsharp;
+  volatile char currentnote_r;
+  volatile char currentsharp_r;
+  volatile char currentnote_s;
+  volatile char currentsharp_s;
 
   volatile uint8_t maxOct = 8;
 
@@ -584,8 +586,10 @@ void scanKeysTask(void * pvParameters) {
     while(1){
         vTaskDelayUntil( &xLastWakeTime, xFrequency );
         uint32_t localstepsize = 0;
-        char localnote = currentnote;
-        char localsharp = currentsharp;
+        char localnote_r = currentnote_r;
+        char localsharp_r = currentsharp_r;
+        char localnote_s = currentnote_s;
+        char localsharp_s = currentsharp_s;
         uint8_t localvolume_r = volume_r;
         uint8_t localoctave_r= octave_r;
         uint8_t localwave_r = wave_r;
@@ -758,8 +762,8 @@ void scanKeysTask(void * pvParameters) {
         if (pressed){
           if(receiver){
               //Used for printing purposes
-              localnote = notes[p_idx_array[0]];
-              localsharp = sharps[p_idx_array[0]];
+              localnote_r = notes[p_idx_array[0]];
+              localsharp_r = sharps[p_idx_array[0]];
 
               
               //int8_t shift = localoctave_r-4;
@@ -775,6 +779,9 @@ void scanKeysTask(void * pvParameters) {
               }
           }
         else if(sender){
+            localnote_s = notes[p_idx_array[0]];
+            localsharp_s = sharps[p_idx_array[0]];
+
           for (uint8_t i = 0; i < 12; i++){
             //Store the pressed keys in the TX_Message to be received by the receiver
             if (p_idx_array[i] != 12) {
@@ -783,6 +790,7 @@ void scanKeysTask(void * pvParameters) {
               TX_Message[2] = p_idx_array[i];
               TX_Message[3] = pos;   
               xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+
             }
             else{
               break;
@@ -793,13 +801,13 @@ void scanKeysTask(void * pvParameters) {
       if (released){
         if(receiver){
             if(!onehot){ //if no keys are pressed
-                localnote = ' ';
-                localsharp = ' ';
+                localnote_r = ' ';
+                localsharp_r = ' ';
             }
             else if (!pressed){
                 uint8_t curr_idx = __builtin_ctz(onehot);
-                localnote = notes[curr_idx];
-                localsharp = sharps[curr_idx];
+                localnote_r = notes[curr_idx];
+                localsharp_r = sharps[curr_idx];
             }
           for (uint8_t i = 0; i < 12; i++){
             if (r_idx_array[i] != 12) {
@@ -812,6 +820,15 @@ void scanKeysTask(void * pvParameters) {
           }
         }
         else if(sender){
+            if(!onehot){ //if no keys are pressed
+                localnote_s = ' ';
+                localsharp_s = ' ';
+            }
+            else if (!pressed){
+                uint8_t curr_idx = __builtin_ctz(onehot);
+                localnote_s = notes[curr_idx];
+                localsharp_s = sharps[curr_idx];
+            }
             for (uint8_t i = 0; i < 12; i++){
               //Send the released keys to the receiver
               if (r_idx_array[i] != 12) {
@@ -832,6 +849,8 @@ void scanKeysTask(void * pvParameters) {
       // Serial.printf("PressedKeys %hu\n",pressedKeysArray);
       // Serial.printf("Keys %hu\n",localpressedKeysArrayMaj);
       if (sender){
+        __atomic_store_n(&currentnote_s, localnote_s, __ATOMIC_RELAXED);
+        __atomic_store_n(&currentsharp_s, localsharp_s, __ATOMIC_RELAXED);
         __atomic_store_n(&A_s, localA_s, __ATOMIC_RELAXED);
         __atomic_store_n(&D_s, localD_s, __ATOMIC_RELAXED);
         __atomic_store_n(&S_s, localS_s, __ATOMIC_RELAXED);
@@ -840,8 +859,8 @@ void scanKeysTask(void * pvParameters) {
       }
       if (receiver){
         __atomic_store_n(&pressedKeysMin, localpressedKeysMin, __ATOMIC_RELAXED);
-        __atomic_store_n(&currentnote, localnote, __ATOMIC_RELAXED);
-        __atomic_store_n(&currentsharp, localsharp, __ATOMIC_RELAXED);
+        __atomic_store_n(&currentnote_r, localnote_r, __ATOMIC_RELAXED);
+        __atomic_store_n(&currentsharp_r, localsharp_r, __ATOMIC_RELAXED);
         __atomic_store_n(&volume_r, localvolume_r, __ATOMIC_RELAXED);
         __atomic_store_n(&octave_r, localoctave_r, __ATOMIC_RELAXED);
         __atomic_store_n(&wave_r, localwave_r, __ATOMIC_RELAXED);
@@ -967,8 +986,8 @@ void displayUpdateTask(void * pvParameters){
               break;
       }
       u8g2.setCursor(32,6);
-      u8g2.print(currentnote);
-      u8g2.print(currentsharp);
+      u8g2.print(currentnote_r);
+      u8g2.print(currentsharp_r);
       u8g2.setCursor(50,16);
       if (volume_r==8){
         u8g2.drawStr(58, 15,"max");
@@ -989,38 +1008,45 @@ void displayUpdateTask(void * pvParameters){
 
     if (sender){
 
-      u8g2.drawStr(2, 32,"A");
-      u8g2.drawStr(44, 32, "D");
-      u8g2.drawStr(85, 32, "S");
-      u8g2.drawStr(122, 32, "R");
+          u8g2.drawStr(2, 15,"Oct:");
+          u8g2.drawStr(2, 6,"Note:");
+          u8g2.setCursor(27,15);
+          u8g2.print(octave_s,DEC);
+          u8g2.setCursor(32,6);
+          u8g2.print(currentnote_s);
+          u8g2.print(currentsharp_s);
 
-      u8g2.setCursor(2,24);
-      u8g2.print(A_s,DEC);
-
-      u8g2.setCursor(44,24);
-      u8g2.print(D_s,DEC);
-
-      u8g2.setCursor(85,24);
-      u8g2.print(S_s,DEC);
-
-      u8g2.setCursor(122,24);
-      u8g2.print(R_s,DEC);
+        if (pos==1){
+          u8g2.drawStr(2, 32,"A");
+          u8g2.drawStr(44, 32, "D");
+          u8g2.drawStr(85, 32, "S");
+          u8g2.drawStr(122, 32, "R");
 
 
-      int attackEnd = map(A_s, 0, 255, 0, 40);
-      int decayEnd = map(D_s, 0, 255, 0, 15);
-      int sustainEnd = map(S_s, 0, 255, 0, 15);
-      int releaseEnd = map(R_s, 0, 255, 0, 40);
-      Serial.println(attackEnd);
-      Serial.println(decayEnd);
-      Serial.println(sustainEnd);
-      Serial.println(releaseEnd);
+          u8g2.setCursor(2,24);
+          u8g2.print(A_s,DEC);
 
-      // Draw the ADSR envelope
-      u8g2.drawLine(45, 15, attackEnd+45, 2);  // Attack segment
-      u8g2.drawLine(attackEnd+45, 2,(attackEnd+45)+ decayEnd, 2 + sustainEnd);  // Decay segment
-      u8g2.drawLine((attackEnd+45)+ decayEnd, 2 + sustainEnd, 80, 2 + sustainEnd);  // Sustain segment
-      u8g2.drawLine(80, 2+sustainEnd, 80+releaseEnd, 15);  // Release segment
+          u8g2.setCursor(44,24);
+          u8g2.print(D_s,DEC);
+
+          u8g2.setCursor(85,24);
+          u8g2.print(S_s,DEC);
+
+          u8g2.setCursor(122,24);
+          u8g2.print(R_s,DEC);
+
+
+          int attackEnd = map(A_s, 0, 255, 0, 40);
+          int decayEnd = map(D_s, 0, 255, 0, 15);
+          int sustainEnd = map(S_s, 0, 255, 0, 14);
+          int releaseEnd = map(R_s, 0, 255, 0, 40);
+      
+          // Draw the ADSR envelope
+          u8g2.drawLine(45, 15, attackEnd+45, 2);  // Attack segment
+          u8g2.drawLine(attackEnd+45, 2,(attackEnd+45)+ decayEnd, 15 - sustainEnd);  // Decay segment
+          u8g2.drawLine((attackEnd+45)+ decayEnd, 13 - sustainEnd, 80, 13 - sustainEnd);  // Sustain segment
+          u8g2.drawLine(80, 13-sustainEnd, 80+releaseEnd, 15);  // Release segment
+        }
 
       // u8g2.drawLine(45,15,55,2);
       // u8g2.drawLine(55,2,60,9);

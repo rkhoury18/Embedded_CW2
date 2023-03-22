@@ -150,43 +150,60 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
 }
 
 //Needed for ADSR
-uint32_t t_r[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-uint32_t t_s[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+volatile uint32_t t_r[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+volatile uint32_t t_s[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
 uint32_t ADSR(uint8_t i, uint8_t A, uint8_t D, uint8_t S, uint8_t R){ 
   if (receiver){
+      //xSemaphoreTake(tvarMutex_r, portMAX_DELAY);
+        // // Serial.printf("time instance: %d\n", t_r[i]);
         static uint32_t scale_r[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-        if (t_r[i] == 0)
+        if (t_r[i] == 0){
             scale_r[i] = 0;
+        }
             
-        else if (t_r[i] < ((A*9 * 22000) >> 8)) //Attack envelope
+        else if (t_r[i] < ((A*9 * 22000) >> 8)){ //Attack envelope
+          // Serial.printf("Attacking\n");
             scale_r[i] += 84*(256/(A));
+        }
             
-        else if (t_r[i] == ((A*9 * 22000) >> 8)) //Attack peak
+        else if (t_r[i] == ((A*9 * 22000) >> 8)){ //Attack peak
             scale_r[i] = 16777215;
+        }
             
-        else if (t_r[i] < (((A*9 + D*76)*22000) >> 8)) //Decay envelope
+        else if (t_r[i] < (((A*9 + D*76)*22000) >> 8)){ //Decay envelope
+          // Serial.printf("Decaying\n");
+
             scale_r[i] =- (16777216 - (204 << 16))/(22000*76) * (256/(D_s));
+        }
             
-        else if (t_r[i] < (((A*9 + D*76 + S*46)*22000) >> 8)) //Sustain envelope
+        else if (t_r[i] < (((A*9 + D*76 + S*46)*22000) >> 8)){ //Sustain envelope
+          // Serial.printf("Sustain\n");
+
             scale_r[i] = 204 << 16;
+        }
             
-        else if (t_r[i] < (((A*9 + D*76 + S*46 + R*60)*22000) >> 8)) //Release envelope
-            scale_r[i] -= (204 << 16)/(22000*60) * (256/(R));
-            
-        else
-            scale_r[i] = 0;
-        xSemaphoreTake(tvarMutex_r, portMAX_DELAY);
-          t_r[i]++;
-        xSemaphoreGive(tvarMutex_r);
+        else if (t_r[i] < (((A*9 + D*76 + S*46 + R*60)*22000) >> 8)){
+          // Serial.printf("Releasing\n");
+
+          scale_r[i] -= (204 << 16)/(22000*60) * (256/(R));
+        } //Release envelope
+        else{
+          // Serial.printf("Out of Rang\n");
+          scale_r[i] = 0;
+        }
+          
+        t_r[i]++;
+        // scale_r[i] += 200;
+        //xSemaphoreGive(tvarMutex_r);
         return scale_r[i];
   }
   if (sender){
-            static uint32_t scale_s[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-        if (t_r[i] == 0)
+    static uint32_t scale_s[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+        if (t_s[i] == 0)
             scale_s[i] = 0;
             
-        else if (t_r[i] < ((A*9 * 22000) >> 8)) //Attack envelope
+        else if (t_s[i] < ((A*9 * 22000) >> 8)) //Attack envelope
             scale_s[i] += 84*(256/(A));
             
         else if (t_s[i] == ((A*9 * 22000) >> 8)) //Attack peak
@@ -290,8 +307,8 @@ void ISRTask(void *pvParameters) {
                   uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
                   if((pressedKeysArray >> i) & 0x1){
                     phaseAcc[i] += step;
-                    int32_t Vout = ((phaseAcc[i] >> 24) - 128);
-                    polyphony_vout += (uint64_t(Vout*ADSR(i,A,D,S,R))) >> 24;
+                    int32_t Vout = (phaseAcc[i] >> 24) - 128;
+                    polyphony_vout += (Vout*ADSR(i,A,D,S,R) >> 24);
                   }
                 }
                 break;
@@ -316,8 +333,9 @@ void ISRTask(void *pvParameters) {
                         increase[i] = 1;
                       } 
                     }
-                    int32_t Vout = ((phaseAcc[i] >> 24) - 128);
-                    polyphony_vout += (uint64_t(Vout*ADSR(i,A,D,S,R))) >> 24;
+                    int32_t Vout = ((phaseAcc[i] >> 24));
+                    polyphony_vout += ((uint64_t(Vout*ADSR(i,A,D,S,R))) >> 24) - 128;
+                    
                   }
                 }
                 break;
@@ -342,8 +360,8 @@ void ISRTask(void *pvParameters) {
                         increase[i] = 1;
                       }
                     }
-                    int32_t Vout = (increase[i] == 1) ? 127 : -128;
-                    polyphony_vout += (uint64_t(Vout*ADSR(i,A,D,S,R))) >> 24;
+                    int32_t Vout = (increase[i] == 1) ? 255 : 0;
+                    polyphony_vout += ((uint64_t(Vout*ADSR(i,A,D,S,R))) >> 24) - 128;
                   }
                 }
                 break;
@@ -353,8 +371,8 @@ void ISRTask(void *pvParameters) {
                   uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
                   if((pressedKeysArray >> i) & 0x1){
                     phaseAcc[i] += step;
-                    int32_t Vout = (sineTable[phaseAcc[i] >> 22] >> 24) - 128;
-                    polyphony_vout += (uint64_t(Vout*ADSR(i,A,D,S,R))) >> 24;
+                    int32_t Vout = (sineTable[phaseAcc[i] >> 22] >> 24);
+                    polyphony_vout += ((uint64_t(Vout*ADSR(i,A,D,S,R))) >> 24) - 128;
                   }
                 }
                 break;
@@ -375,7 +393,6 @@ void ISRTask(void *pvParameters) {
 void recieverTask(){
   uint32_t localpressedKeysMin = pressedKeysMin;
   uint16_t localpressedKeysMaj = pressedKeysMaj;
-  // Serial.printf("%c",RX_Message[0]);
   if (RX_Message[0] == 'R'){
     if(RX_Message[3] == 1){
       localpressedKeysMin &= ~(1 << (12+RX_Message[2]));
@@ -463,7 +480,7 @@ void senderTask(){
     __atomic_store_n(&maj_s, localmaj, __ATOMIC_RELAXED);
     __atomic_store_n(&min_s, localmin, __ATOMIC_RELAXED);
 
-    uint64_t released = ~((uint64_t)localmin) << 24 | localmaj;
+    uint64_t released = ~((uint64_t)localmin << 24 | localmaj);
     for(uint8_t i=0; i<36; i++){
       if(released & (1<<i)){
         xSemaphoreTake(tvarMutex_s, portMAX_DELAY);
@@ -623,10 +640,10 @@ void scanKeysTask(void * pvParameters) {
               Knob3.SetLimits(0,8);
               Knob2.SetLimits(0,maxOct);
               Knob1.SetLimits(0,3);
-              KnobA.SetLimits(0,12);
-              KnobD.SetLimits(0,12);
-              KnobS.SetLimits(0,12);
-              KnobR.SetLimits(0,12);
+              KnobA.SetLimits(0,120);
+              KnobD.SetLimits(0,120);
+              KnobS.SetLimits(0,120);
+              KnobR.SetLimits(0,120);
         }
 
         if(receiver){
@@ -732,6 +749,7 @@ void scanKeysTask(void * pvParameters) {
 
         }
         if (pressed){
+          Serial.println("Pressed");
           if(receiver){
               //Used for printing purposes
               localnote = notes[p_idx_array[0]];
@@ -767,6 +785,7 @@ void scanKeysTask(void * pvParameters) {
         }
       }
       if (released){
+        Serial.println("Released");
         if(receiver){
             if(!onehot){ //if no keys are pressed
                 localnote = ' ';
@@ -779,6 +798,8 @@ void scanKeysTask(void * pvParameters) {
             }
           for (uint8_t i = 0; i < 12; i++){
             if (r_idx_array[i] != 12) {
+              Serial.println ("Setting to 0");
+              Serial.println(String(r_idx_array[i]));
               xSemaphoreTake(tvarMutex_r, portMAX_DELAY);
               t_r[r_idx_array[i]]=0;
               xSemaphoreGive(tvarMutex_r);
@@ -1074,7 +1095,7 @@ void setup() {
     "ISRTaskUpdate",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    3,			/* Task priority */
+    2,			/* Task priority */
     &ISRTaskHandle );
     
     TaskHandle_t decodeTaskHandle = NULL;

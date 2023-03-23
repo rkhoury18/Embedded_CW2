@@ -14,7 +14,7 @@
 | krish is retard  |  e |  f | g  | h |
 
 
-### Identification of tasks performed by system and their method of implementation
+### Identification of tasks performed by system and their method of implementation (Thread or Interrupt)
 
 ### Characterisation of each task: theoretical minimum initiation interval and measured maximum execution time
 

@@ -5,19 +5,21 @@
 #include <ES_CAN.h>
 #include "knobs.h"
 
-// #define sender 0
-// #define reciever 0
+#define SENDER
+// #define RECEIVER 
 
-//#define DISABLE_THREADS
+#define DISABLE_THREADS
 //#define TEST_SCAN_KEYS
 //#define TEST_DISPLAY_UPDATE
-//#define TEST_DECODE
-//#define TEST_CAN_TX
-//#define TEST_CAN_RX_ISR
-//#define TEST_CAN_TX_ISR
+// #define TEST_DECODE
+// #define TEST_CAN_TX
+// #define TEST_CAN_RX_ISR
+// #define TEST_CAN_TX_ISR
 //#define TEST_ISRTASK
-//#define TEST_SAMPLEISR
-//#define TEST_SEND_SOUND
+// #define TEST_SAMPLE_ISR
+// #define TEST_SEND_SOUND
+
+
 #define SAMPLE_BUFFER_SIZE 128
 //Variable neede for Double Buffer 
 uint8_t sampleBuffer0[SAMPLE_BUFFER_SIZE];
@@ -55,8 +57,19 @@ SemaphoreHandle_t sampleBufferMutex;
   volatile uint8_t pos = 0;
 
   // Role of keyboard  in chain
-  volatile bool receiver = false;
-  volatile bool sender = false;
+  #ifndef DISABLE_THREADS
+    volatile bool receiver = false;
+    volatile bool sender = false;
+  #else
+    #ifdef RECEIVER
+      volatile bool receiver = true;
+      volatile bool sender = false;
+    #endif
+    #ifdef SENDER
+      volatile bool receiver = false;
+      volatile bool sender = true;
+    #endif
+  #endif
   volatile bool singleton = true;
 
   //Needed for communication between keyboards
@@ -184,7 +197,7 @@ void sampleISR() {
       analogWrite(OUTR_PIN, sampleBuffer1[readCtr++]);
   #else
     static uint32_t readCtr = 0;
-    if (readCtr == SAMPLE_BUFFER_SIZE) {
+    if (true) {
       readCtr = 0;
       writeBuffer1 = !writeBuffer1;
       xSemaphoreGiveFromISR(sampleBufferMutex, NULL);
@@ -383,40 +396,52 @@ void ISRTask(void *pvParameters) {
 }
 
 void recieverTask(){
+  #ifndef TEST_DECODE
   uint32_t localpressedKeysMin = pressedKeysMin;
   uint16_t localpressedKeysMaj = pressedKeysMaj;
   if (RX_Message[0] == 'R'){
     if(RX_Message[3] == 1){
       localpressedKeysMin &= ~(1 << (12+RX_Message[2]));
+  __atomic_store_n(&pressedKeysMin, localpressedKeysMin,__ATOMIC_RELAXED);
+
     }
     else if(RX_Message[3] == 2){
       localpressedKeysMaj &= ~(1 << RX_Message[2]);
+  __atomic_store_n(&pressedKeysMaj, localpressedKeysMaj,__ATOMIC_RELAXED);
+
     }
   }
   //If key is pressed set to correct step size
   else if (RX_Message[0] == 'P'){
     if(RX_Message[3] == 1){
       localpressedKeysMin |= (1 << (12+RX_Message[2]));
+  __atomic_store_n(&pressedKeysMin, localpressedKeysMin,__ATOMIC_RELAXED);
+
     }
     else if(RX_Message[3] == 2){
       localpressedKeysMaj |= (1 << RX_Message[2]);
-      Serial.println ("Maj: "+String(localpressedKeysMaj));
+  __atomic_store_n(&pressedKeysMaj, localpressedKeysMaj,__ATOMIC_RELAXED);
+
     }
   }
-  else if (RX_Message[0]='M'){
-    Serial.println ("Received maxOct: "+String(RX_Message[1]));
+  else if (RX_Message[0]=='M'){
     uint8_t localmaxOct = 8-RX_Message[1];
     __atomic_store_n(&maxOct, localmaxOct,__ATOMIC_RELAXED);
 
   }
   // Serial.printf("keys recieved %hu\n", localpressedKeysArrayMaj);
   //Write step size to the pressedKeys array to play it
+  #else
+  uint32_t localpressedKeysMin = pressedKeysMin;
+  uint16_t localpressedKeysMaj = pressedKeysMaj;
+  localpressedKeysMin &= ~(1 << (12+RX_Message[2]));
   __atomic_store_n(&pressedKeysMin, localpressedKeysMin,__ATOMIC_RELAXED);
-  __atomic_store_n(&pressedKeysMaj, localpressedKeysMaj,__ATOMIC_RELAXED);
+  #endif
 }
 
 void senderTask(){
 //Message received is handshake 
+  #ifndef TEST_DECODE
   if (RX_Message[0] == 'H'){
     pos = RX_Message[1] + 1;
     octave_s = RX_Message[2] + 1;
@@ -459,8 +484,31 @@ void senderTask(){
     __atomic_store_n(&maj_s, localmaj, __ATOMIC_RELAXED);
     __atomic_store_n(&min_s, localmin, __ATOMIC_RELAXED);
   }
-}
+  #else
+    pos = RX_Message[1] + 1;
+    octave_s = RX_Message[2] + 1;
+    volume_s = RX_Message[3];
 
+    xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
+      for (uint8_t i=5; i<7; i++) {
+        setRow(i);
+        digitalWrite(OUTR_PIN,1);         //Enable selected row
+        digitalWrite(REN_PIN,1);          //Enable selected row
+        delayMicroseconds(3);             //Wait for column inputs to stabilise
+        keyArray[i] = readCols();         //Read column inputs
+        digitalWrite(REN_PIN,0);          //Disable selected row
+      }
+      uint8_t west_detect = ((keyArray[5]&0x08)>>3)^0x01;
+      uint8_t east_detect = ((keyArray[6]&0x08)>>3)^0x01;
+    xSemaphoreGive(keyArrayMutex);
+
+    //Send to other keyboards connected to get their position
+    if(true){
+      uint8_t TX_Message[8] = {'H',pos, octave_s, volume_r, 0, 0, 0, 0};
+      xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+    }
+  #endif
+}
 
 void decodeTask(void * pvParameters){
   #ifndef TEST_DECODE
@@ -474,17 +522,17 @@ void decodeTask(void * pvParameters){
     }
   }
   #else
-  xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
+  for(int i = 0; i<36; i++){
+    xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
     if(receiver){
       recieverTask();
     }
     else if(sender){
       senderTask();
     }
-    #endif
-  } 
-
-
+  }
+  #endif
+} 
 
 void CAN_RX_ISR (void) {
   #ifndef TEST_CAN_RX_ISR
@@ -501,12 +549,9 @@ void CAN_RX_ISR (void) {
 }
 
 void CAN_TX_ISR (void) {
-  #ifndef TEST_CAN_TX_ISR
-	xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
-  #else
-    xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
-  #endif
-
+  // Serial.println("start");
+  xSemaphoreGiveFromISR(CAN_TX_Semaphore, NULL);
+  // Serial.println("not blocked");
 }
 
 void CAN_TX_Task (void * pvParameters) {
@@ -518,12 +563,14 @@ void CAN_TX_Task (void * pvParameters) {
     CAN_TX(0x123, msgOut);
 	}
   #else
+  	uint8_t msgOut[8];
+  for(int i = 0; i<3; i++){
     xQueueReceive(msgOutQ, msgOut, portMAX_DELAY);
     xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
     CAN_TX(0x123, msgOut);
-  #endif
-}
-
+  }
+  #endif 
+  }
 
 void sendSoundTask (void * pvParameters) {
   #ifndef TEST_SEND_SOUND
@@ -545,15 +592,15 @@ void sendSoundTask (void * pvParameters) {
     prevPressed = localPressedKeys;
   }
   #else
+    volatile uint64_t prevPressed = 0;
     uint64_t localPressedKeys;
     localPressedKeys = ((uint64_t)pressedKeysMaj) << 24 | pressedKeysMin;
-    if(receiver && !singleton && localPressedKeys != prevPressed){
+    // Serial.println("this exexc");
+    if(true){
       uint8_t TX_Message[8] = {'V', (pressedKeysMin & 0xFF), (pressedKeysMin>>8 & 0xFF), (pressedKeysMin>>16 & 0xFF), (pressedKeysMaj & 0xFF), (pressedKeysMaj>>8 & 0xFF), 0, 0};
       // Serial.println("Sending:"+String(pressedKeysMaj));
       xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
       // Serial.printf("Sending: %d\n", TX_Message[4]<<24 | TX_Message[3]<<16 | TX_Message[2]<<8 | TX_Message[1]);
-    }
-    else {
     }
     prevPressed = localPressedKeys;
   #endif
@@ -938,26 +985,28 @@ void displayUpdateTask(void * pvParameters){
     }
 
     if (sender){
-    if (sender){
-      if (pos == 1){
-          u8g2.drawStr(2, 32, "K1");  
-          u8g2.drawStr(39, 32, "K2");
-          u8g2.drawStr(80, 32, "K3");
-          u8g2.drawStr(116, 32, "K4");
-          u8g2.drawStr(2, 15,"Oct:");
-          u8g2.drawStr(2, 6,"Note:");
-          u8g2.drawStr(48, 6,"Vibrato(K3):");
-          u8g2.drawStr(48, 15,"Tremolo(K4):");
-          u8g2.setCursor(27,15);
-          u8g2.print(octave_s,DEC);
-          u8g2.setCursor(32,6);
-          // u8g2.print(currentnote_s);
-          // u8g2.print(currentsharp_s);
-          u8g2.setCursor(120,6);
-          // u8g2.print(vibrato_s,DEC);
-          u8g2.setCursor(120,15);
-          // u8g2.print(tremolo_s,DEC);
+      u8g2.drawStr(2, 15,"Vol:");
+      u8g2.drawStr(2, 23,"Oct:");
+      // u8g2.drawStr(2, 6,"Note:");
+      u8g2.setCursor(35,10);
+      // u8g2.print(currentnote);
+      // u8g2.print(currentsharp);
+      u8g2.setCursor(25,16);
+      if (volume_s==8){
+        u8g2.drawStr(33, 15,"max");
       }
+      else if (volume_s==0){
+          u8g2.drawStr(33, 15,"min");
+      }
+      u8g2.print(volume_s,DEC);
+      u8g2.setCursor(25,24);
+      if (octave_s==8){
+        u8g2.drawStr(33, 23,"max");
+      }
+      else if (octave_s==0){
+          u8g2.drawStr(33, 23,"min");
+      }
+      u8g2.print(octave_s,DEC);
 
     }
 
@@ -1067,12 +1116,12 @@ void displayUpdateTask(void * pvParameters){
 
 void setup() {
   // put your setup code here, to run once:
-    msgInQ = xQueueCreate(36,8);
+  msgInQ = xQueueCreate(36,8);
  
-  #ifndef TEST_SCAN_KEYS
-    msgOutQ = xQueueCreate(36,8);
-  #else
+  #if defined(TEST_SCAN_KEYS) || defined(TEST_SEND_SOUND)
     msgOutQ = xQueueCreate(384,8);
+  #else
+    msgOutQ = xQueueCreate(36,8);
   #endif
 
 
@@ -1132,7 +1181,7 @@ void setup() {
     &sendSoundTaskHandle);
   #endif
 
-  #ifdef TEST_SCAN_KEYS
+  #ifdef TEST_SCAN_KEYS 
   TaskHandle_t scanKeysHandle = NULL;
     xTaskCreate(
     scanKeysTask,		/* Function that implements the task */
@@ -1143,7 +1192,7 @@ void setup() {
     &scanKeysHandle );  /* Pointer to store the task handle */
   #endif
 
-  #ifdef TEST_DISPLAY_UPDATE
+  #ifdef TEST_DISPLAY_UPDATE 
   TaskHandle_t displayUpdateTaskHandle = NULL;
     xTaskCreate(
     displayUpdateTask,		/* Function that implements the task */
@@ -1176,22 +1225,40 @@ void setup() {
     &CAN_TX_TaskHandle);
   #endif
 
+  #ifdef TEST_SEND_SOUND
+  TaskHandle_t sendSoundTaskHandle = NULL;
+    xTaskCreate(
+    sendSoundTask,		/* Function that implements the task */
+    "sendSound",		/* Text name for the task */
+    256,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    4,			/* Task priority */ 
+    &sendSoundTaskHandle);
+  #endif
+
+  #ifdef TEST_ISR
+  TaskHandle_t ISRTaskHandle = NULL;
+    xTaskCreate(
+    ISRTask,		/* Function that implements the task */
+    "ISRTaskUpdate",		/* Text name for the task */
+    256,      		/* Stack size in words, not bytes */
+    NULL,			/* Parameter passed into the task */
+    5,			/* Task priority */
+    &ISRTaskHandle );
+  #endif
+
   pressedKeysArrayMutex = xSemaphoreCreateMutex();
   sampleBufferMutex = xSemaphoreCreateBinary();
   xSemaphoreGive(sampleBufferMutex);
   keyArrayMutex = xSemaphoreCreateMutex();
   CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
 
-
-
-
-  CAN_Init(false);
-  #ifndef DISABLE_THREADS
+  
+    CAN_Init(false);
     CAN_RegisterRX_ISR(CAN_RX_ISR);
     CAN_RegisterTX_ISR(CAN_TX_ISR);
-  #endif
-  setCANFilter(0x123,0x7ff);
-  CAN_Start();
+    setCANFilter(0x123,0x7ff);
+    CAN_Start();
 
 
 
@@ -1219,30 +1286,12 @@ void setup() {
   u8g2.begin();
   setOutMuxBit(DEN_BIT, HIGH);  //Enable display power supply
 
-  uint32_t id_0 = HAL_GetUIDw0();
-  uint32_t id_1 = HAL_GetUIDw1();
-  uint32_t id_2 = HAL_GetUIDw2();
-
-  uint16_t id_0_half = (id_0 >> 16) ^ (id_0 & 0x00FF);
-  uint16_t id_1_half = (id_1 >> 16) ^ (id_1 & 0x00FF);
-  uint16_t id_2_half = (id_2 >> 16) ^ (id_2 & 0x00FF);
-
-  uint8_t id_0_byte = (id_0_half >> 8) ^ (id_0_half & 0x00FF);
-  uint8_t id_1_byte = (id_1_half >> 8) ^ (id_1_half & 0x00FF);
-  uint8_t id_2_byte = (id_2_half >> 8) ^ (id_2_half & 0x00FF);
-
-  uint8_t id = id_0_byte ^ id_1_byte ^ id_2_byte;
-
-  Serial.print("ID: ");
-  Serial.print(id_0, HEX);
-  Serial.print(id_1, HEX);
-  Serial.println(id_2, HEX);
-
+  #ifndef DISABLE_THREADS
   bool outBits[7] = {0,0,0,1,1,1,1};
 
   for (uint8_t i=0; i<7; i++) {
     setRow(i);                     //Set row address
-    digitalWrite(OUT_PIN,outBits[i]); //Set value to latch in DFF
+    digitalWrite(+OUT_PIN,outBits[i]); //Set value to latch in DFF
   }
   
   delayMicroseconds(1000);
@@ -1259,22 +1308,11 @@ void setup() {
   east_detect = ((keyArray[6]&0x08)>>3)^0x01;
   auto_detect(west_detect,east_detect);
 
-  if(receiver){
-    Serial.println("Reciever");
-  }
-  else if(sender){
-    Serial.println("Sender");
-  }
-  else{
-    Serial.println("Error");
-  }
+  #endif
   //Initialise UART
   Serial.begin(9600);
   Serial.println("Hello World");
-  Serial.print("init west_detect: ");
-  Serial.println(west_detect);
-  Serial.print("init east_detect: ");
-  Serial.println(east_detect);
+
 
   TIM_TypeDef *Instance = TIM1;
   HardwareTimer *sampleTimer = new HardwareTimer(Instance);
@@ -1285,6 +1323,23 @@ void setup() {
   sampleTimer->resume();
 
   #ifdef DISABLE_THREADS
+    #ifdef TEST_CAN_TX_ISR
+      for(int i=0; i<3; i++){
+        xSemaphoreTake(CAN_TX_Semaphore, portMAX_DELAY);
+      }
+    #endif
+    #ifdef TEST_CAN_TX
+      for(int i=0; i<3; i++){
+        uint8_t TX_Message[8] = {0};
+        xQueueSend( msgOutQ, TX_Message, portMAX_DELAY);
+      }
+    #endif
+    #ifdef TEST_DECODE
+      for(int i=0; i<36; i++){
+        uint8_t RX_Message[8] = {0};
+        xQueueSend(msgInQ, RX_Message,portMAX_DELAY);
+      }
+    #endif
     uint32_t startTime = micros();
     #ifdef TEST_SCAN_KEYS
       for (int iter = 0; iter < 32; iter++) {
@@ -1295,6 +1350,28 @@ void setup() {
       for (int iter = 0; iter < 32; iter++) {
         displayUpdateTask(NULL);
       }
+    #endif
+    #ifdef TEST_CAN_TX_ISR
+      CAN_TX_ISR();
+    #endif
+    #ifdef TEST_CAN_RX_ISR
+      for (int iter = 0; iter < 36; iter++) {
+        CAN_RX_ISR();
+      }
+    #endif
+    #ifdef TEST_CAN_TX
+      CAN_TX_Task(NULL);
+    #endif
+    #ifdef TEST_DECODE
+     decodeTask(NULL);
+    #endif
+    #ifdef TEST_SEND_SOUND
+     for(int i =0; i<32; i++){
+      sendSoundTask(NULL);
+     }
+    #endif
+    #ifdef TEST_SAMPLE_ISR
+      sampleISR();
     #endif
     Serial.println(micros()-startTime);
     while(1);

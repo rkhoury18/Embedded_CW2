@@ -10,14 +10,12 @@
 
 
 ## Analysis:
----
 [Timing and CPU analysis of our synthesizer](doc/CPUanalysisandtiming.md)
 
 
 
 
 ## User Manual:
----
 [How to use our synthesizer](doc/howtouse.md)
 
 

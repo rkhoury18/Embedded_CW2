@@ -5,8 +5,7 @@
 Our synthesizer has multtiple features, all of which are listed below:
 
 - LFO: Our synthesizer contains a Low Frequency Oscillator, designed to produce both Vibrato and Tremolo effects. Vibrato is a form of frequency modulation while Tremolo is a form of amplitude modulation
-- ADSR: 
-
+- ADSR: The ADSR envelope is an essential tool for shaping the sound of a synthesizer, allowing the user to control the duration and character of each note played. By adjusting the four parameters one can create a wide range of sound effects and textures, from short, percussive sounds to long, sustained tones.
 
     
 

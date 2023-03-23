@@ -1,5 +1,5 @@
 # Embedded Systems Coursework 2 Report
----
+
 ## Features of our synthesizer:
 - feature 1
 - feature 2

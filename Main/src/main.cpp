@@ -74,7 +74,7 @@ SemaphoreHandle_t sampleBufferMutex;
   volatile uint32_t maj_s = 0;
   volatile uint32_t min_s = 0;
   volatile uint8_t vibrato_s = 0; // Ints from [0, 20]
-  volatile uint8_t tremolo_s = 10; // Ints from [0, 20]
+  volatile uint8_t tremolo_s = 0; // Ints from [0, 20]
 
 
   //Receiver variables
@@ -83,7 +83,7 @@ SemaphoreHandle_t sampleBufferMutex;
   volatile uint8_t wave_r = 0;
   volatile int32_t vout_r = 0;
   volatile uint8_t vibrato_r = 0; // Ints from [0, 20]
-  volatile uint8_t tremolo_r = 10; // Ints from [0, 20]
+  volatile uint8_t tremolo_r = 0; // Ints from [0, 20]
 
 
   volatile uint8_t keyArray[7];
@@ -152,80 +152,36 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
 
 //LFO
 //LFO
-volatile uint32_t t_vib[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-volatile uint32_t t_trem[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+volatile uint32_t t_vib_s[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+volatile uint32_t t_vib_r[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+volatile uint32_t t_trem_s[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+volatile uint32_t t_trem_r[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
-volatile uint32_t scale_vibrato[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-volatile uint32_t scale_tremolo[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-SemaphoreHandle_t tremoloMutex;
-SemaphoreHandle_t vibratoMutex;
-
-
-void vibratoTask  (void *pvParameters){
-    const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    uint64_t pressedKeyArray = 0;
-    uint8_t vibrato;
-    while(1){
-      if (receiver){
-          pressedKeyArray= (((uint64_t)pressedKeysMaj)<<24) | pressedKeysMin;
-          vibrato=vibrato_r;
-        }
-        else{
-          pressedKeyArray= (((uint64_t)min_s)<<24) | maj_s;
-          vibrato=vibrato_s;
-        }
-      xSemaphoreTake(vibratoMutex, portMAX_DELAY);
-      for (uint8_t i = 0; i<36; i++){
-        if ((pressedKeyArray >> i) & 0x1){
-          vTaskDelayUntil( &xLastWakeTime, xFrequency );
-          uint32_t time = t_vib[i]++;
-          uint32_t index = ((time * 4096 * vibrato) / 22000) % 4096;
-          scale_vibrato[i] = LFOTable[index];
-        }
-        else{
-          t_vib[i]=0;
-          scale_vibrato[i]=0;
-        }
-
-      }
-      xSemaphoreGive(vibratoMutex);
-
-    }
-
+uint32_t LFOVibrato(uint8_t i) {
+  if (receiver){
+    uint32_t time = t_vib_r[i]++;
+    uint32_t index = ((time * 4096 * vibrato_r) / 22000) % 4096;
+    return LFOTable[index];
+  }
+  if (sender) {
+    uint32_t time = t_vib_s[i]++;
+    uint32_t index = ((time * 4096 * vibrato_s) / 22000) % 4096;
+    return LFOTable[index];
+  }
 }
-
-void tremoloTask (void *pvParameters){
-    const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    uint64_t pressedKeyArray = 0;
-    uint8_t tremolo;
-    while(1){
-      vTaskDelayUntil( &xLastWakeTime, xFrequency );
-      if (receiver){
-          pressedKeyArray= (((uint64_t)pressedKeysMaj)<<24) | pressedKeysMin;
-          tremolo=tremolo_r;
-      }
-      else{
-          pressedKeyArray= (((uint64_t)min_s)<<24) | maj_s;
-          tremolo=tremolo_s;
-      }
-      xSemaphoreTake(tremoloMutex, portMAX_DELAY);
-      for (uint8_t i = 0; i<36; i++){
-          if ((pressedKeyArray >> i) & 0x1){
-            uint32_t time = t_vib[i]++;
-            uint32_t index = ((time * 4096 * vibrato_r) / 22000) % 4096;
-            scale_tremolo[i] = LFOTable[index];
-          }
-          else{
-            t_trem[i] = 0;
-            scale_tremolo[i] = 0;
-
-          }
-      }
-      xSemaphoreGive(tremoloMutex);
+            
+int32_t LFOTremolo(uint8_t i) {
+  if (receiver){
+    uint32_t time = t_trem_r[i]++;
+    uint32_t index = ((time * 4096 * tremolo_r) / 22000) % 4096;
+    return LFOTable[index];
+  }
+  if (sender) {
+    uint32_t time = t_trem_s[i]++;
+    uint32_t index = ((time * 4096 * tremolo_s) / 22000) % 4096;
+    return LFOTable[index];
     }
-}
+  }
             
 
 void auto_detect(bool west, bool east){
@@ -305,91 +261,75 @@ void ISRTask(void *pvParameters) {
           int32_t polyphony_vout = 0;
           switch (wave){
               case 0 :  //Sawtooth
-                xSemaphoreTake(vibratoMutex, portMAX_DELAY);
-                xSemaphoreTake(tremoloMutex, portMAX_DELAY);
                 for (uint8_t i=0; i<36;i++){
                   int8_t shift = baseoct + (uint8_t)(i/12);
                   uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
-                  uint64_t real_step = (uint64_t((uint64_t)step * (uint64_t)scale_vibrato[i]) >> 24);
+                  uint64_t real_step = (uint64_t((uint64_t)step * (uint64_t)LFOVibrato(i)) >> 24);
                   
                   if((pressedKeysArray >> i) & 0x1){
                     phaseAcc[i] += real_step;
                     int32_t tmp_Vout = ((phaseAcc[i] >> 24)  - 128);
-                    int32_t Vout = (int64_t(scale_tremolo[i] * tmp_Vout) >> 24);
+                    int32_t Vout = (int64_t(LFOTremolo(i) * tmp_Vout) >> 24);
                     polyphony_vout += Vout;
                   }
                 }
-                xSemaphoreGive(tremoloMutex);
-                xSemaphoreGive(vibratoMutex);
                 break;
               case 1 : //Triangle
-                xSemaphoreTake(vibratoMutex, portMAX_DELAY);
-                xSemaphoreTake(tremoloMutex, portMAX_DELAY);
                 for (uint8_t i=0; i<36;i++){
                   int8_t shift = baseoct + (uint8_t)(i/12);
                   uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
-                  uint64_t real_step = (((uint64_t)step * (uint64_t)scale_vibrato[i]) >> 24);
+                  uint64_t real_step = (((uint64_t)step * (uint64_t)LFOVibrato(i)) >> 24);
 
                   if((pressedKeysArray >> i) & 0x1){
                     phaseAcc[i] += real_step;
                     if (phaseAcc[i] < 2147483648) {
                         int32_t tmp_Vout = ((phaseAcc[i] << 1) >> 24) - 128;
-                        int32_t Vout = (int64_t(scale_tremolo[i] * tmp_Vout) >> 24);
+                        int32_t Vout = (int64_t(LFOTremolo(i) * tmp_Vout) >> 24);
                         polyphony_vout += Vout;
                     } else {
                         uint64_t tmp = (-(phaseAcc[i] << 1)) + (8589934591);
                         int32_t tmp_Vout = (((tmp >> 24)) << 32)- 128;
-                        int32_t Vout = (int64_t(scale_tremolo[i] * tmp_Vout) >> 24);
+                        int32_t Vout = ((LFOTremolo(i) * tmp_Vout) >> 24);
                         polyphony_vout += Vout;
                       }
                       }
                     }
-                xSemaphoreGive(tremoloMutex);
-                xSemaphoreGive(vibratoMutex);
                 break;
               case 2 : //Square
-                xSemaphoreTake(vibratoMutex, portMAX_DELAY);
-                xSemaphoreTake(tremoloMutex, portMAX_DELAY);
                 for (uint8_t i=0; i<36;i++){
                   int8_t shift = baseoct + (uint8_t)(i/12);
                   uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
-                  uint64_t real_step = (((uint64_t)step * (uint64_t)scale_vibrato[i]) >> 24);
+                  uint64_t real_step = (((uint64_t)step * (uint64_t)LFOVibrato(i)) >> 24);
 
                   if((pressedKeysArray >> i) & 0x1){
                     phaseAcc[i] += real_step;
                     if (phaseAcc[i] < 2147483648) {
                         int32_t tmp_vout = 127;
-                        int32_t Vout = (int64_t(scale_tremolo[i] * tmp_vout) >> 24) - 128;
+                        int32_t Vout = (int64_t(LFOTremolo(i) * tmp_vout) >> 24);
                         polyphony_vout += Vout;
                     } else {
                         int32_t tmp_vout = -128;
-                        int32_t Vout = (int64_t(scale_tremolo[i] * tmp_vout) >> 24) - 128;
+                        int32_t Vout = (int64_t(LFOTremolo(i) * tmp_vout) >> 24);
                         polyphony_vout += Vout;
                       }
                       } 
                     }
-                  xSemaphoreGive(tremoloMutex);
-                  xSemaphoreGive(vibratoMutex);
                 break;
               case 3 : //Sine
-                xSemaphoreTake(vibratoMutex, portMAX_DELAY);
-                xSemaphoreTake(tremoloMutex, portMAX_DELAY);
                 for (uint8_t i=0; i<36;i++){
                   int8_t shift = baseoct + (uint8_t)(i/12);
                   uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
-                  uint64_t real_step = (((uint64_t)step * (uint64_t)scale_vibrato[i]) >> 24);
+                  uint64_t real_step = (((uint64_t)step * (uint64_t)LFOVibrato(i)) >> 24);
                     
                   if((pressedKeysArray >> i) & 0x1){
                     phaseAcc[i] += real_step;
                     int32_t tmp_vout = ((sineTable[phaseAcc[i] >> 22] >> 24) - 128);
-                    int32_t Vout = (int64_t(scale_tremolo[i] * tmp_vout) >> 24) ;
+                    int32_t Vout = (int64_t(LFOTremolo(i) * tmp_vout) >> 24) ;
                     // Serial.print(Vout);
                     // Serial.print(" ");
                     polyphony_vout += Vout;
                   }
                 }
-                xSemaphoreGive(tremoloMutex);
-                xSemaphoreGive(vibratoMutex);
                 break;
           }
           polyphony_vout = polyphony_vout >> (8 - vol);
@@ -1210,28 +1150,10 @@ void setup() {
     1,			/* Task priority */
     &displayUpdateTaskHandle );
 
-    TaskHandle_t tremoloTaskHandle = NULL;
-    xTaskCreate(
-    tremoloTask,		/* Function that implements the task */
-    "tremoloTask",		/* Text name for the task */
-    256,      		/* Stack size in words, not bytes */
-    NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
-    &tremoloTaskHandle );
-
-    TaskHandle_t vibratoTaskHandle = NULL;
-    xTaskCreate(
-    vibratoTask,		/* Function that implements the task */
-    "vibratoTask",		/* Text name for the task */
-    256,      		/* Stack size in words, not bytes */
-    NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
-    &vibratoTaskHandle );
-
     TaskHandle_t ISRTaskHandle = NULL;
     xTaskCreate(
     ISRTask,		/* Function that implements the task */
-    "ISRTask",		/* Text name for the task */
+    "ISRTaskUpdate",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
     2,			/* Task priority */
@@ -1243,7 +1165,7 @@ void setup() {
     "decode",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
+    1,			/* Task priority */
     &decodeTaskHandle);
 
     TaskHandle_t CAN_TX_TaskHandle = NULL;
@@ -1252,7 +1174,7 @@ void setup() {
     "CanTX",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
+    1,			/* Task priority */
     &CAN_TX_TaskHandle);
 
     TaskHandle_t sendSoundTaskHandle = NULL;
@@ -1261,7 +1183,7 @@ void setup() {
     "sendSound",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */ 
+    1,			/* Task priority */ 
     &sendSoundTaskHandle);
   #endif
 
@@ -1310,8 +1232,6 @@ void setup() {
   #endif
 
   pressedKeysArrayMutex = xSemaphoreCreateMutex();
-  tremoloMutex = xSemaphoreCreateMutex();
-  vibratoMutex = xSemaphoreCreateMutex();
   sampleBufferMutex = xSemaphoreCreateBinary();
   xSemaphoreGive(sampleBufferMutex);
   keyArrayMutex = xSemaphoreCreateMutex();

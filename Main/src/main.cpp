@@ -1102,21 +1102,27 @@ void displayUpdateTask(void * pvParameters){
           u8g2.setCursor(32,6);
           u8g2.print(currentnote);
           u8g2.print(currentsharp);
-          u8g2.setCursor(27,15);
+          u8g2.setCursor(25,15);
           u8g2.print(octave,DEC);
-      if (pos == 1){
+          if (octave==8){
+              u8g2.drawStr(33, 15,"max");
+          }
+          else if (octave==0){
+              u8g2.drawStr(33, 15,"min");
+          }
+      if (pos == 2){
           u8g2.drawStr(2, 32, "K1");  
           u8g2.drawStr(39, 32, "K2");
           u8g2.drawStr(80, 32, "K3");
           u8g2.drawStr(116, 32, "K4");
-          u8g2.drawStr(48, 6,"Vib(K3):");
-          u8g2.drawStr(48, 15,"Trem(K4):");
-          u8g2.setCursor(120,6);
+          u8g2.drawStr(61, 10,"Vib(K3):");
+          u8g2.drawStr(61, 19,"Trem(K4):");
+          u8g2.setCursor(115,10);
           u8g2.print(vibrato,DEC);
-          u8g2.setCursor(120,15);
+          u8g2.setCursor(115,19);
           u8g2.print(tremolo,DEC);
       }
-      if (pos == 2){
+      if (pos == 1){
           u8g2.drawStr(2, 32,"A");
           u8g2.drawStr(44, 32, "D");
           u8g2.drawStr(85, 32, "S");
@@ -1132,7 +1138,16 @@ void displayUpdateTask(void * pvParameters){
           u8g2.setCursor(85,24);
           u8g2.print(S,DEC);
 
-          u8g2.setCursor(122,24);
+          if (R<10){
+            u8g2.setCursor(122,24);
+          }
+          else if (R<100){
+            u8g2.setCursor(117,24);
+          }
+          else{
+            u8g2.setCursor(110,24);
+
+          }
           u8g2.print(R,DEC);
 
 
@@ -1142,10 +1157,10 @@ void displayUpdateTask(void * pvParameters){
           int releaseEnd = map(R, 0, 255, 0, 40);
       
           // Draw the ADSR envelope
-          u8g2.drawLine(45, 15, attackEnd+45, 2);  // Attack segment
-          u8g2.drawLine(attackEnd+45, 2,(attackEnd+45)+ decayEnd, 15 - sustainEnd);  // Decay segment
-          u8g2.drawLine((attackEnd+45)+ decayEnd, 13 - sustainEnd, 80, 13 - sustainEnd);  // Sustain segment
-          u8g2.drawLine(80, 13-sustainEnd, 80+releaseEnd, 15);  // Release segment
+          u8g2.drawLine(70, 15, attackEnd+70, 2);  // Attack segment
+          u8g2.drawLine(attackEnd+70, 2,(attackEnd+70)+ decayEnd, 15 - sustainEnd);  // Decay segment
+          u8g2.drawLine((attackEnd+70)+ decayEnd, 13 - sustainEnd, 105, 13 - sustainEnd);  // Sustain segment
+          u8g2.drawLine(105, 13-sustainEnd, 105+releaseEnd, 15);  // Release segment
       }
 
     }

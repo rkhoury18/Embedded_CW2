@@ -14,6 +14,17 @@
 | krish is retard  |  e |  f | g  | h |
 
 
+### Identification of tasks performed by system and their method of implementation
+
+### Characterisation of each task: theoretical minimum initiation interval and measured maximum execution time
+
+### Critical instant analysis of the rate monotonic scheduler
+
+### CPU utilisation. 
+
+### Identification of shared data structures and methods used to guarantee safe accessand synchronisation.
+
+### Analysis of inter-task blocking dependencies and possibility of deadlock
 
 
 

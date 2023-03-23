@@ -2,7 +2,17 @@
 
 ## Features of our synthesizer:
 
-Our synthesizer includes multiple features, all of which are listed below:
+Our synthesizer includes multiple base and advanced features, all of which are listed below. On how to use these features, refer to the User Manual. 
+
+**Base Features:**
+- **Key scanning task:**
+- **Display update task:** 
+- **Mutex:**
+- **Knob class:**
+- **CAN bus communication:**
+
+
+**Advanced Features:**
 
 - **LFO:** Our synthesizer contains a Low Frequency Oscillator, designed to produce both Vibrato and Tremolo effects. Vibrato is a form of frequency modulation while Tremolo is a form of amplitude modulation
 - **Waveform selection:** The user is able to change the Timbre of the sound produced by selecting A square, traingle, saw-tooth or Sine wave waveform.
@@ -14,7 +24,8 @@ Our synthesizer includes multiple features, all of which are listed below:
     - Note: The Octave level for each Keyboard is also dynamically allocated. If 3 keyboards are connected, the maximum octave level of the master keyboard is automatically set to 6, as the 2nd and 3rd keyboard are set to octave band 7 and 8 respectively. 
 - **Key-board auto-detect:** Our synthesizer allows the user to cascade multiple keyboards, in any order. By default, the left most keyboard will be the master keyboard, while each succesive keyboard to the masters right will be 1 octave higher. Keboards can be disconnected and reconnected while playing, however, some synchronization erros might appear. This would require the user to rest the board using the reset button. 
 - **Stereo:** When the user uses multiple keyboards, each of the speakers connected are also employed. This enable the Stereo effect, where the resulting sound is given more depth. 
-- 
+- **Double Buffer**
+
 
 ## Analysis:
 [Timing and CPU analysis of our synthesizer](doc/CPUanalysisandtiming.md)

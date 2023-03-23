@@ -66,30 +66,29 @@ SemaphoreHandle_t sampleBufferMutex;
   QueueHandle_t msgOutQ;
   BaseType_t xHigherPriorityTaskWoken = pdTRUE;
 
-  //Sender variables
-  volatile uint8_t octave_s;
-  volatile uint8_t volume_s;
-  volatile uint8_t wave_s;
-  volatile int32_t vout_s = 0;
+  //Receiver and sender variables
+  volatile uint8_t octave;
+  volatile uint8_t volume;
+  volatile uint8_t wave;
+  volatile int32_t vout = 0;
   volatile uint32_t maj_s = 0;
   volatile uint32_t min_s = 0;
-  volatile uint8_t vibrato_s = 0; // Ints from [0, 20]
-  volatile uint8_t tremolo_s = 0; // Ints from [0, 20]
-  volatile char currentnote_s;
-  volatile char currentsharp_s; 
+  volatile uint8_t vibrato = 0; // Ints from [0, 20]
+  volatile uint8_t tremolo = 0; // Ints from [0, 20]
+  volatile char currentnote;
+  volatile char currentsharp;
 
+  //ADSR values 
+  volatile uint8_t A=1;
+  volatile uint8_t D=1;
+  volatile uint8_t S=1;
+  volatile uint8_t R=1;
 
-  //Receiver variables
-  volatile uint8_t volume_r = 4;
-  volatile uint8_t octave_r = 4;
-  volatile uint8_t wave_r = 0;
-  volatile int32_t vout_r = 0;
-  volatile uint8_t vibrato_r = 0; // Ints from [0, 20]
-  volatile uint8_t tremolo_r = 0; // Ints from [0, 20]
-  volatile char currentnote_r;
-  volatile char currentsharp_r;
+  //LFO Variables
+  volatile uint32_t t_vib = 0;
+  volatile uint32_t t_trem[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
-
+  //Pressed Keys
   volatile uint8_t keyArray[7];
   SemaphoreHandle_t keyArrayMutex;
 
@@ -154,40 +153,20 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
       digitalWrite(REN_PIN,LOW);
 }
 
-//LFO
-//LFO
-volatile uint32_t t_vib_s = 0;
-volatile uint32_t t_vib_r = 0;
-volatile uint32_t t_trem_s[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-volatile uint32_t t_trem_r[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
 uint32_t LFOVibrato() {
-  if (receiver){
-    uint32_t time = t_vib_r++;
-    uint32_t index = ((time * 4096 * vibrato_r) / 22000 * 128) % 4096;
-    return LFOTable[index] + 8388608;
-  }
-  if (sender) {
-    uint32_t time = t_vib_s++;
-    uint32_t index = ((time * 4096 * vibrato_s) / 22000 * 128) % 4096;
-    return LFOTable[index] + 8388608;
-  }
+  uint32_t time = t_vib++;
+  uint32_t index = ((time * 4096 * vibrato) / 22000 * 128) % 4096;
+  return LFOTable[index] + 8388608;
 }
             
 uint32_t LFOTremolo(uint8_t i) {
-  if (receiver){
-    uint32_t time = t_trem_r[i]++;
-    uint32_t index = ((time * 4096 * tremolo_r) / 22000 * 128) % 4096;
+    uint32_t time = t_trem[i]++;
+    uint32_t index = ((time * 4096 * tremolo) / 22000 * 128) % 4096;
     return LFOTable[index];
-  }
-  if (sender) {
-    uint32_t time = t_trem_s[i]++;
-    uint32_t index = ((time * 4096 * tremolo_s) / 22000 *128) % 4096;
-    return LFOTable[index];
-  }
-  }
-            
+}
 
+//Sets main keyboard position to 0 and send handshake if others are connected
 void auto_detect(bool west, bool east){
   if(!west){ //most west module
     uint8_t locpos = 0;
@@ -195,7 +174,7 @@ void auto_detect(bool west, bool east){
     bool locsender = false;
     if(east){ // >=2 modules
       bool locSingleton = false;
-      uint8_t TX_Message[8] = {'H',pos,octave_r,volume_r,wave_r,0,0,0}; //Handshake, position, 0, 0, 0, 0, 0, 0
+      uint8_t TX_Message[8] = {'H',locpos,octave,volume,wave,0,0,0}; //Handshake, position, 0, 0, 0, 0, 0, 0
       xQueueSend(msgOutQ, TX_Message, 0);
       __atomic_store_n(&singleton, locSingleton,__ATOMIC_RELAXED);
     }
@@ -208,8 +187,6 @@ void auto_detect(bool west, bool east){
     __atomic_store_n(&pos, locpos,__ATOMIC_RELAXED);
     __atomic_store_n(&receiver, locreceiver,__ATOMIC_RELAXED);
     __atomic_store_n(&sender, locsender,__ATOMIC_RELAXED);
-
-
   }
   else{
     bool locsender = true; //either east or middle 2/3 modules
@@ -220,6 +197,7 @@ void auto_detect(bool west, bool east){
     __atomic_store_n(&sender, locsender,__ATOMIC_RELAXED);
   }
 }
+
 
 void sampleISR() {
   #ifdef TEST_SAMPLEISR
@@ -236,7 +214,7 @@ void sampleISR() {
       analogWrite(OUTR_PIN, sampleBuffer1[readCtr++]);
   #else
     static uint32_t readCtr = 0;
-    if (readCtr == SAMPLE_BUFFER_SIZE) {
+    if (readCtr == 128) {
       readCtr = 0;
       writeBuffer1 = !writeBuffer1;
       xSemaphoreGiveFromISR(sampleBufferMutex, NULL);
@@ -257,56 +235,49 @@ void ISRTask(void *pvParameters) {
   uint64_t real_step[36] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
   uint64_t pressedKeysArray = 0;
   uint8_t baseoct;
-  uint8_t vol;
-  uint8_t wave;
-  uint8_t tremolo;
-  uint8_t vibrato;
+  uint8_t localvol;
+  uint8_t localwave;
+  uint8_t localtremolo;
+  uint8_t localvibrato;
   while (1) {
-        if(receiver){
-          pressedKeysArray = ((((uint64_t)pressedKeysMaj) << 24) | pressedKeysMin);
-          baseoct = octave_r - 4;
-          vol = volume_r;
-          wave = wave_r;
-          tremolo = tremolo_r;
-          vibrato = vibrato_r;
-        }
-        else if(sender){
-          pressedKeysArray = ((uint64_t)min_s) << 24 | maj_s;
-          baseoct = octave_s - pos - 4;
-          vol = volume_s;
-          wave = wave_s;
-          tremolo = tremolo_s;
-          vibrato = vibrato_s;
-        }
-    bool  vib = false;
-      
+    bool  vibrato_enable = false;
+    uint8_t localvolume = volume;
+    uint8_t localwave = wave;
+    uint8_t localtremolo = tremolo;
+    uint8_t localvibrato = vibrato;
+    if(receiver){
+      pressedKeysArray = ((((uint64_t)pressedKeysMaj) << 24) | pressedKeysMin);
+    }
+    else if(sender){
+      pressedKeysArray = ((uint64_t)maj_s) << 24 | min_s;
+    }  
     for (uint8_t i=0; i<36; i++){
         if ((pressedKeysArray >> i) & 0x1){
-          if (!vib){
-            scale_vibrato = LFOVibrato();
-            vib = true;
-          }
           int8_t shift = baseoct + (uint8_t)(i/12);
           uint32_t step = shift>0 ? stepSizes[i%12]<<shift : stepSizes[i%12]>>-shift;
-          if (vibrato){
+          if (!vibrato_enable){
+            scale_vibrato = LFOVibrato();
+            vibrato_enable = true;
+          }
+          if (localvibrato){
             real_step[i] = (uint64_t((uint64_t)step * (uint64_t)scale_vibrato) >> 24);
           }
           else {
             real_step[i] = step;
           }
-          if (tremolo){
+          if (localtremolo){
             scale_tremolo[i] = LFOTremolo(i);
           }
         }
         else{
-          if (!vib){
+          if (!vibrato_enable){
             scale_vibrato = 0;
           }
           scale_tremolo[i] = 0;
         }
     }
     xSemaphoreTake(sampleBufferMutex, portMAX_DELAY);
-      for (uint32_t writeCtr = 0; writeCtr < SAMPLE_BUFFER_SIZE; writeCtr++) {
+      for (uint32_t writeCtr = 0; writeCtr < 128; writeCtr++) {
           static uint32_t phaseAcc[36] = {0};
           static int increase[36] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
           int32_t polyphony_vout = 0;
@@ -315,7 +286,6 @@ void ISRTask(void *pvParameters) {
                 for (uint8_t i=0; i<36;i++){
                   if((pressedKeysArray >> i) & 0x1){
                     phaseAcc[i] += real_step[i];
-                    // phaseAcc[i] += step;
                     int32_t tmp_Vout = ((phaseAcc[i] >> 24)  - 128);
                     if (tremolo){
                       int32_t Vout = (int64_t(scale_tremolo[i] * tmp_Vout) >> 24);
@@ -328,48 +298,50 @@ void ISRTask(void *pvParameters) {
               case 1 : //Triangle
                 for (uint8_t i=0; i<36;i++){
                   if((pressedKeysArray >> i) & 0x1){
-                    phaseAcc[i] += real_step[i];
-                    if (phaseAcc[i] < 2147483648) {
-                        int32_t tmp_Vout = ((phaseAcc[i] << 1) >> 24) - 128;
-                        if (tremolo){
-                          int32_t Vout = (int64_t(scale_tremolo[i] * tmp_Vout) >> 24);
-                          polyphony_vout += Vout;
+                        phaseAcc[i] += real_step[i];
+                        if (phaseAcc[i] < 2147483648) {
+                              int32_t tmp_Vout = ((phaseAcc[i] << 1) >> 24) - 128;
+                              if (tremolo){
+                                  int32_t Vout = (int64_t(scale_tremolo[i] * tmp_Vout) >> 24);
+                                  polyphony_vout += Vout;
+                              }
+                              else polyphony_vout += tmp_Vout;
+                        } 
+                        else {
+                              uint64_t tmp = (-(phaseAcc[i] << 1)) + (8589934591);
+                              int32_t tmp_Vout = (((tmp >> 24)) << 32)- 128;
+                              int32_t Vout = ((scale_tremolo[i] * tmp_Vout) >> 24);
+                              if (tremolo){
+                                  int32_t Vout = (int64_t(scale_tremolo[i] * tmp_Vout) >> 24);
+                                  polyphony_vout += Vout;
+                              }
+                              else polyphony_vout += tmp_Vout;
                         }
-                        else polyphony_vout += tmp_Vout;
-                    } else {
-                        uint64_t tmp = (-(phaseAcc[i] << 1)) + (8589934591);
-                        int32_t tmp_Vout = (((tmp >> 24)) << 32)- 128;
-                        int32_t Vout = ((scale_tremolo[i] * tmp_Vout) >> 24);
-                        if (tremolo){
-                          int32_t Vout = (int64_t(scale_tremolo[i] * tmp_Vout) >> 24);
-                          polyphony_vout += Vout;
-                        }
-                        else polyphony_vout += tmp_Vout;
-                      }
-                      }
                     }
+                }
                 break;
               case 2 : //Square
                 for (uint8_t i=0; i<36;i++){
                   if((pressedKeysArray >> i) & 0x1){
-                    phaseAcc[i] += real_step[i];
-                    if (phaseAcc[i] < 2147483648) {
-                        int32_t tmp_Vout = 127;
-                        if (tremolo){
-                          int32_t Vout = (int64_t(scale_tremolo[i] * tmp_Vout) >> 24);
-                          polyphony_vout += Vout;
+                        phaseAcc[i] += real_step[i];
+                        if (phaseAcc[i] < 2147483648) {
+                            int32_t tmp_Vout = 127;
+                            if (tremolo){
+                              int32_t Vout = (int64_t(scale_tremolo[i] * tmp_Vout) >> 24);
+                              polyphony_vout += Vout;
+                            }
+                            else polyphony_vout += tmp_Vout;
+                        } 
+                        else {
+                            int32_t tmp_Vout = -128;
+                            if (tremolo){
+                              int32_t Vout = (int64_t(scale_tremolo[i] * tmp_Vout) >> 24);
+                              polyphony_vout += Vout;
+                            }
+                            else polyphony_vout += tmp_Vout;
                         }
-                        else polyphony_vout += tmp_Vout;
-                    } else {
-                        int32_t tmp_Vout = -128;
-                        if (tremolo){
-                          int32_t Vout = (int64_t(scale_tremolo[i] * tmp_Vout) >> 24);
-                          polyphony_vout += Vout;
-                        }
-                        else polyphony_vout += tmp_Vout;
-                      }
-                      } 
-                    }
+                  } 
+                }
                 break;
               case 3 : //Sine
                 for (uint8_t i=0; i<36;i++){  
@@ -387,15 +359,13 @@ void ISRTask(void *pvParameters) {
                 }
                 break;
           }
-          polyphony_vout = polyphony_vout >> (8 - vol);
+          polyphony_vout = polyphony_vout >> (8 - localvolume);
           polyphony_vout = max(-128, min(127, (int)polyphony_vout));
-            if (writeBuffer1)
-              sampleBuffer1[writeCtr] = polyphony_vout + 128;
-            else
-              sampleBuffer0[writeCtr] = polyphony_vout + 128;
-            
-            vout_r = polyphony_vout;
-      }
+          if (writeBuffer1)
+            sampleBuffer1[writeCtr] = polyphony_vout + 128;
+          else
+            sampleBuffer0[writeCtr] = polyphony_vout + 128;
+    }
   }
   #else
       uint64_t pressedKeysArray = 0;
@@ -492,56 +462,52 @@ void ISRTask(void *pvParameters) {
 void receiverTask(){
   uint32_t localpressedKeysMin = pressedKeysMin;
   uint16_t localpressedKeysMaj = pressedKeysMaj;
+
+  //Received a release message
   if (RX_Message[0] == 'R'){
-    if(RX_Message[3] == 1){
-      localpressedKeysMin &= ~(1 << (12+RX_Message[2]));
-  __atomic_store_n(&pressedKeysMin, localpressedKeysMin,__ATOMIC_RELAXED);
+      if(RX_Message[3] == 1){
+        localpressedKeysMin &= ~(1 << (12+RX_Message[2]));
+        __atomic_store_n(&pressedKeysMin, localpressedKeysMin,__ATOMIC_RELAXED);
 
-    }
-    else if(RX_Message[3] == 2){
-      localpressedKeysMaj &= ~(1 << RX_Message[2]);
-  __atomic_store_n(&pressedKeysMaj, localpressedKeysMaj,__ATOMIC_RELAXED);
+      }
+      else if(RX_Message[3] == 2){
+        localpressedKeysMaj &= ~(1 << RX_Message[2]);
+        __atomic_store_n(&pressedKeysMaj, localpressedKeysMaj,__ATOMIC_RELAXED);
 
-    }
+      }
   }
-  //If key is pressed set to correct step size
+  //Received a press message
   else if (RX_Message[0] == 'P'){
-    if(RX_Message[3] == 1){
-      localpressedKeysMin |= (1 << (12+RX_Message[2]));
-  __atomic_store_n(&pressedKeysMin, localpressedKeysMin,__ATOMIC_RELAXED);
-    }
-    else if(RX_Message[3] == 2){
-      localpressedKeysMaj |= (1 << RX_Message[2]);
-  __atomic_store_n(&pressedKeysMaj, localpressedKeysMaj,__ATOMIC_RELAXED);
-
-      // Serial.println ("Maj: "+String(localpressedKeysMaj));
-    }
+      if(RX_Message[3] == 1){
+        localpressedKeysMin |= (1 << (12+RX_Message[2]));
+        __atomic_store_n(&pressedKeysMin, localpressedKeysMin,__ATOMIC_RELAXED);
+      }
+      else if(RX_Message[3] == 2){
+        localpressedKeysMaj |= (1 << RX_Message[2]);
+        __atomic_store_n(&pressedKeysMaj, localpressedKeysMaj,__ATOMIC_RELAXED);
+      }
   }
+  //Message to set max octave
   else if (RX_Message[0] == 'M'){
-    uint8_t localmaxOct = 8-RX_Message[1];
-    __atomic_store_n(&maxOct, localmaxOct,__ATOMIC_RELAXED);
+      uint8_t localmaxOct = 8-RX_Message[1];
+      __atomic_store_n(&maxOct, localmaxOct,__ATOMIC_RELAXED);
   }
+
+  //Received LFO variables
   else if (RX_Message[0] == 'L'){
     uint8_t localtremolo = RX_Message[1];
     uint8_t localvibrato = RX_Message[2];
-    __atomic_store_n(&tremolo_r, localtremolo,__ATOMIC_RELAXED);
-    __atomic_store_n(&vibrato_r, localvibrato,__ATOMIC_RELAXED);
+    __atomic_store_n(&tremolo, localtremolo,__ATOMIC_RELAXED);
+    __atomic_store_n(&vibrato, localvibrato,__ATOMIC_RELAXED);
   }
-
-  // Serial.printf("keys recieved %hu\n", localpressedKeysArrayMaj);
-  //Write step size to the pressedKeys array to play it
 }
 
 void senderTask(){
-//Message received is handshake 
+  //Message received is handshake 
   if (RX_Message[0] == 'H'){
     uint8_t locpos = RX_Message[1] + 1;
-    uint8_t lococtave_s = RX_Message[2] + 1;
-    uint8_t locvolume_s = RX_Message[3];
-    __atomic_store_n(&pos, locpos, __ATOMIC_RELAXED);
-    __atomic_store_n(&octave_s, lococtave_s, __ATOMIC_RELAXED);
-    __atomic_store_n(&volume_s, locvolume_s, __ATOMIC_RELAXED);
-
+    uint8_t lococtave = RX_Message[2] + 1;
+    uint8_t locvolume = RX_Message[3];
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
       for (uint8_t i=5; i<7; i++) {
         setRow(i);
@@ -557,31 +523,34 @@ void senderTask(){
 
     //Send to other keyboards connected to get their position
     if(east_detect){
-      uint8_t TX_Message[8] = {'H',pos, octave_s, volume_r, 0, 0, 0, 0};
+      uint8_t TX_Message[8] = {'H',locpos, lococtave, locvolume, 0, 0, 0, 0};
       xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
     }
     else{
-      uint8_t TX_Message[8] = {'M',pos, 0, 0, 0, 0, 0, 0};
+      uint8_t TX_Message[8] = {'M',locpos, 0, 0, 0, 0, 0, 0};
       xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
     }
+    __atomic_store_n(&pos, locpos, __ATOMIC_RELAXED);
+    __atomic_store_n(&octave, lococtave, __ATOMIC_RELAXED);
+    __atomic_store_n(&volume, locvolume, __ATOMIC_RELAXED);
   }
-  //Info from the knobs
+  //Info from the knobs received
   else if (RX_Message[0] == 'K'){
     uint8_t lococtave_s = RX_Message[2] + pos;
     uint8_t locvolume_s = RX_Message[3];
     uint8_t locwave_s = RX_Message[4];
     uint8_t loctremolo_s = RX_Message[5];
     uint8_t locvibrato_s = RX_Message[6];
-    __atomic_store_n(&octave_s, lococtave_s, __ATOMIC_RELAXED);
-    __atomic_store_n(&volume_s, locvolume_s, __ATOMIC_RELAXED);
-    __atomic_store_n(&wave_s, locwave_s, __ATOMIC_RELAXED);
-    __atomic_store_n(&tremolo_s, loctremolo_s, __ATOMIC_RELAXED);
-    __atomic_store_n(&vibrato_s, locvibrato_s, __ATOMIC_RELAXED);
+    __atomic_store_n(&octave, lococtave_s, __ATOMIC_RELAXED);
+    __atomic_store_n(&volume, locvolume_s, __ATOMIC_RELAXED);
+    __atomic_store_n(&wave, locwave_s, __ATOMIC_RELAXED);
+    __atomic_store_n(&tremolo, loctremolo_s, __ATOMIC_RELAXED);
+    __atomic_store_n(&vibrato, locvibrato_s, __ATOMIC_RELAXED);
   }
   //Voltage message to know what notes to play
   else if (RX_Message[0] == 'V'){
-    uint32_t localmaj = RX_Message[3]<<16 | RX_Message[2]<<8 | RX_Message[1];
-    uint16_t localmin = RX_Message[5]<<8 | RX_Message[4];
+    uint32_t localmin = RX_Message[3]<<16 | RX_Message[2]<<8 | RX_Message[1];
+    uint16_t localmaj = RX_Message[5]<<8 | RX_Message[4];
     __atomic_store_n(&maj_s, localmaj, __ATOMIC_RELAXED);
     __atomic_store_n(&min_s, localmin, __ATOMIC_RELAXED);
   }
@@ -656,15 +625,14 @@ void sendSoundTask (void * pvParameters) {
   const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
   uint64_t localPressedKeys;
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  volatile uint64_t prevPressed = 0;
+  uint64_t prevPressed = 0;
+
   while(1){
-    localPressedKeys = ((uint64_t)pressedKeysMaj) << 24 | pressedKeysMin;
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    localPressedKeys = ((uint64_t)pressedKeysMaj) << 24 | pressedKeysMin;
     if(receiver && !singleton && localPressedKeys != prevPressed){
-      uint8_t TX_Message[8] = {'V', (pressedKeysMin & 0xFF), (pressedKeysMin>>8 & 0xFF), (pressedKeysMin>>16 & 0xFF), (pressedKeysMaj & 0xFF), (pressedKeysMaj>>8 & 0xFF), 0, 0};
-      // Serial.println("Sending:"+String(pressedKeysMaj));
-      xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
-      // Serial.printf("Sending: %d\n", TX_Message[4]<<24 | TX_Message[3]<<16 | TX_Message[2]<<8 | TX_Message[1]);
+        uint8_t TX_Message[8] = {'V', (pressedKeysMin & 0xFF), (pressedKeysMin>>8 & 0xFF), (pressedKeysMin>>16 & 0xFF), (pressedKeysMaj & 0xFF), (pressedKeysMaj>>8 & 0xFF), 0, 0};
+        xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
     }
     prevPressed = localPressedKeys;
   }
@@ -693,31 +661,41 @@ void scanKeysTask(void * pvParameters) {
     Knob Knob1 (0,0);
     Knob KnobT (0,0);
     Knob KnobV (0,0);
+    Knob KnobA (0,1);
+    Knob KnobD (0,1);
+    Knob KnobS (0,1);
+    Knob KnobR (0,1);
     uint16_t prevPressedKeys = 0;
     uint16_t pressedKeys = 0;
     uint8_t TX_Message[8] = {0};
     uint32_t reset[36] = {0};
+    //Needed so that we only send message if something changes
     uint8_t prevOctave=4 ;
     uint8_t prevVolume=4;
     uint8_t prevWave = 0;
-    bool start = true;
     uint8_t prevMaxOct = 0;
     uint8_t prevVibrato = 0;
     uint8_t prevTremolo = 0;
     uint32_t localstepsize = 0;
+    bool start = true;
 
     while(1){
          vTaskDelayUntil(&xLastWakeTime, xFrequency);
           char localnote = currentnote;
           char localsharp = currentsharp;
-          uint8_t localvolume_r = volume_r;
-          uint8_t localoctave_r= octave_r;
-          uint8_t localwave_r = wave_r;
-          uint8_t localTremolo_s = tremolo_s;
-          uint8_t localVibrato_s = vibrato_s;
+          uint8_t localvolume = volume;
+          uint8_t localoctave= octave;
+          uint8_t localwave = wave;
+          uint8_t localTremolo = tremolo;
+          uint8_t localVibrato = vibrato;
+          uint8_t localpos = pos;
           uint32_t localpressedKeysMin = pressedKeysMin;
           uint32_t localpressedKeysMaj = pressedKeysMaj;
           uint8_t localkeyArray[7] = {0};
+          uint32_t localA = A;
+          uint32_t localD = D;
+          uint32_t localS = S;
+          uint32_t localR = R;
         //Get keys info
         for (uint8_t i = 0; i < 7; i++){
           setRow(i);
@@ -743,34 +721,39 @@ void scanKeysTask(void * pvParameters) {
 
         //If a keyboard is connected or disconnected run autodetect again
         if (localwest_detect != west_detect){ //west detect has changed
-            if(receiver){
-                localpressedKeysMin = 0;
-                __atomic_store_n(&pressedKeysMin, localpressedKeysMin, __ATOMIC_RELAXED);
-                __atomic_store_n(&pressedKeysMaj, 0x0000, __ATOMIC_RELAXED);
-            }
-            auto_detect(localwest_detect, localeast_detect);
-            __atomic_store_n(&west_detect, localwest_detect, __ATOMIC_RELAXED);
+              if(receiver){
+                  localpressedKeysMin = 0;
+                  __atomic_store_n(&pressedKeysMin, localpressedKeysMin, __ATOMIC_RELAXED);
+                  __atomic_store_n(&pressedKeysMaj, 0x0000, __ATOMIC_RELAXED);
+              }
+              auto_detect(localwest_detect, localeast_detect);
+              __atomic_store_n(&west_detect, localwest_detect, __ATOMIC_RELAXED);
         }
         if (localeast_detect != east_detect){
-          if(receiver){
-            localpressedKeysMin= 0;
-            __atomic_store_n(&pressedKeysMin, localpressedKeysMin, __ATOMIC_RELAXED);
-            __atomic_store_n(&pressedKeysMaj, 0x0000, __ATOMIC_RELAXED);
-          }
-          auto_detect(localwest_detect, localeast_detect);
-          if(sender){
-            uint8_t TX_Message[8] = {'H',pos, octave_s, volume_s, 0, 0, 0, 0};
-            xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
-          }
-          __atomic_store_n(&east_detect, localeast_detect, __ATOMIC_RELAXED);
+              if(receiver){
+                localpressedKeysMin= 0;
+                __atomic_store_n(&pressedKeysMin, localpressedKeysMin, __ATOMIC_RELAXED);
+                __atomic_store_n(&pressedKeysMaj, 0x0000, __ATOMIC_RELAXED);
+              }
+              auto_detect(localwest_detect, localeast_detect);
+              if(sender){
+                uint8_t TX_Message[8] = {'H',localpos, localoctave, localvolume, 0, 0, 0, 0};
+                xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+              }
+              __atomic_store_n(&east_detect, localeast_detect, __ATOMIC_RELAXED);
         }
+
+        //Set limits for knobs 
         if (prevMaxOct != maxOct){
-              // Serial.println ("Setting max"+String(maxOct));
               Knob3.SetLimits(0,8);
               Knob2.SetLimits(0,maxOct);
               Knob1.SetLimits(0,3);
               KnobT.SetLimits(0,20);
               KnobV.SetLimits(0,20);
+              KnobA.SetLimits(0,255);
+              KnobD.SetLimits(0,255);
+              KnobS.SetLimits(0,255);
+              KnobR.SetLimits(0,255);
         }
 
         if(receiver){
@@ -780,22 +763,21 @@ void scanKeysTask(void * pvParameters) {
           Knob3.UpdateRotateVal(currentBA_3);
           Knob2.UpdateRotateVal(currentBA_2);
           Knob1.UpdateRotateVal(currentBA_1);
-          localvolume_r = Knob3.CurRotVal();
-          localoctave_r = Knob2.CurRotVal();
-          localwave_r = Knob1.CurRotVal();
+          localvolume = Knob3.CurRotVal();
+          localoctave = Knob2.CurRotVal();
+          localwave = Knob1.CurRotVal();
 
           //Send Knob info to other modules if something changed
-          if (!singleton && (localoctave_r != prevOctave || localvolume_r != prevVolume || localwave_r != prevWave)){
-            // Serial.println ("cur octave: "+String(localoctave_r)+" cur volume: "+String(localvolume_r));
+          if (!singleton && (localoctave != prevOctave || localvolume != prevVolume || localwave != prevWave)){
             TX_Message[0] = 'K';
-            TX_Message[2] = localoctave_r;
-            TX_Message[3] = localvolume_r;
-            TX_Message[4] = localwave_r;
-            TX_Message[5] = tremolo_r;
-            TX_Message[6] = vibrato_r;
-            __atomic_store_n(&volume_r, localvolume_r, __ATOMIC_RELAXED);
-            __atomic_store_n(&octave_r, localoctave_r, __ATOMIC_RELAXED);
-            __atomic_store_n(&wave_r, localwave_r, __ATOMIC_RELAXED);
+            TX_Message[2] = localoctave;
+            TX_Message[3] = localvolume;
+            TX_Message[4] = localwave;
+            TX_Message[5] = tremolo;
+            TX_Message[6] = vibrato;
+            __atomic_store_n(&volume, localvolume, __ATOMIC_RELAXED);
+            __atomic_store_n(&octave, localoctave, __ATOMIC_RELAXED);
+            __atomic_store_n(&wave, localwave, __ATOMIC_RELAXED);
             xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
 
           }
@@ -806,21 +788,37 @@ void scanKeysTask(void * pvParameters) {
             uint8_t currentBA_2 = (localkeyArray[3] & 0x0C)>>2; //00001100 select 2 bits before last 2 bits and shift
             KnobT.UpdateRotateVal(currentBA_3);
             KnobV.UpdateRotateVal(currentBA_2);
-            localVibrato_s = KnobV.CurRotVal();
-            localTremolo_s = KnobT.CurRotVal();
-            if (localVibrato_s != prevVibrato || localTremolo_s != prevTremolo){
+            localVibrato = KnobV.CurRotVal();
+            localTremolo = KnobT.CurRotVal();
+            //Send Knob info to other modules if something changed
+            if (localVibrato != prevVibrato || localTremolo != prevTremolo){
               TX_Message[0] = 'L';
-              TX_Message[1] = localTremolo_s;
-              TX_Message[2] = localVibrato_s;
+              TX_Message[1] = localTremolo;
+              TX_Message[2] = localVibrato;
               xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
             }
           }
+          if (pos == 2){
+              uint8_t currBA_3 = localkeyArray[3] & 0x03; //00000011 select last 2 bits
+              uint8_t currBA_2 = (localkeyArray[3] & 0x0C)>>2; //00001100 select 2 bits before last 2 bits and shift
+              uint8_t currBA_1 = localkeyArray[4] & 0x03; //00000011 select last 2 bits
+              uint8_t currBA_0 = (localkeyArray[4] & 0x0C)>>2; //00001100 select 2 bits before last 2 bits and shift
+              KnobR.UpdateRotateVal(currBA_3);
+              KnobS.UpdateRotateVal(currBA_2);
+              KnobD.UpdateRotateVal(currBA_1);
+              KnobA.UpdateRotateVal(currBA_0);
+              localR = KnobR.CurRotVal();
+              localS = KnobS.CurRotVal();
+              localD = KnobD.CurRotVal();
+              localA = KnobA.CurRotVal();
+            }
         }
-        prevWave = localwave_r;
-        prevOctave = localoctave_r;
-        prevVolume = localvolume_r;
-        prevVibrato = localVibrato_s;
-        prevTremolo = localTremolo_s;
+        prevWave = localwave;
+        prevOctave = localoctave;
+        prevVolume = localvolume;
+        prevVibrato = localVibrato;
+        prevTremolo = localTremolo;
+
         //Code for getting cords 
         //Variables needed for getting cords
         uint16_t onehot = pressedKeys^0xFFF;
@@ -839,74 +837,68 @@ void scanKeysTask(void * pvParameters) {
         while (onehotCopy | prevPressedkeysCopy){
           //Checking if there are keys pressed or released
           if  (onehotCopy == 0){
-            cur_idx = 12;
-            prev_idx = __builtin_ctz(prevPressedkeysCopy);
+              cur_idx = 12;
+              prev_idx = __builtin_ctz(prevPressedkeysCopy);
           }
           else if (prevPressedkeysCopy == 0){
-            prev_idx = 12;
-            cur_idx = __builtin_ctz(onehotCopy);
+              prev_idx = 12;
+              cur_idx = __builtin_ctz(onehotCopy);
           }
           else{
-            cur_idx = __builtin_ctz(onehotCopy);
-            prev_idx = __builtin_ctz(prevPressedkeysCopy);
+              cur_idx = __builtin_ctz(onehotCopy);
+              prev_idx = __builtin_ctz(prevPressedkeysCopy);
           }
         
           //Checking if the keys pressed or deleted have previously been detected
           if (prev_idx==cur_idx){
-            onehotCopy &= ~(1<<cur_idx);
-            prevPressedkeysCopy &= ~(1<<cur_idx);
+              onehotCopy &= ~(1<<cur_idx);
+              prevPressedkeysCopy &= ~(1<<cur_idx);
           }
           else if (prev_idx>cur_idx){
-            pressed = true;
-            p_idx_array[p_count] = cur_idx;
-            onehotCopy &= ~(1<<cur_idx);
-            p_count++;
+              pressed = true;
+              p_idx_array[p_count] = cur_idx;
+              onehotCopy &= ~(1<<cur_idx);
+              p_count++;
           }
           else{
-            released = true;
-            r_idx_array[r_count] = prev_idx;
-            prevPressedkeysCopy &= ~(1<<prev_idx);
-            r_count++;
+              released = true;
+              r_idx_array[r_count] = prev_idx;
+              prevPressedkeysCopy &= ~(1<<prev_idx);
+              r_count++;
           }
 
         }
         if (pressed){
-          if(receiver){
-              //Used for printing purposes
+                //Used for printing purposes
               localnote = notes[p_idx_array[0]];
               localsharp = sharps[p_idx_array[0]];
-
-              
-              //int8_t shift = localoctave_r-4;
-              
+              if(receiver){
+                  for (uint8_t i = 0; i < 12; i++){
+                    if (p_idx_array[i] != 12) {
+                      localpressedKeysMin |= (1<<p_idx_array[i]);
+                    }
+                    else{
+                      break;
+                    }
+                  }
+              }
+            else if(sender){
               for (uint8_t i = 0; i < 12; i++){
+                //Send to receiver if key pressed
                 if (p_idx_array[i] != 12) {
-                  //localstepsize = shift>0 ? stepSizes[p_idx_array[i]]<<shift : stepSizes[p_idx_array[i]]>>-shift;
-                  localpressedKeysMin |= (1<<p_idx_array[i]);
+                  TX_Message[0] = 'P';
+                  TX_Message[1] = octave;
+                  TX_Message[2] = p_idx_array[i];
+                  TX_Message[3] = pos;   
+                  xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
                 }
                 else{
                   break;
                 }
               }
-          }
-        else if(sender){
-          for (uint8_t i = 0; i < 12; i++){
-            //Store the pressed keys in the TX_Message to be received by the receiver
-            if (p_idx_array[i] != 12) {
-              TX_Message[0] = 'P';
-              TX_Message[1] = octave_s;
-              TX_Message[2] = p_idx_array[i];
-              TX_Message[3] = pos;   
-              xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
             }
-            else{
-              break;
-            }
-          }
-        }
       }
       if (released){
-        if(receiver){
             if(!onehot){ //if no keys are pressed
                 localnote = ' ';
                 localsharp = ' ';
@@ -916,30 +908,31 @@ void scanKeysTask(void * pvParameters) {
                 localnote = notes[curr_idx];
                 localsharp = sharps[curr_idx];
             }
-          for (uint8_t i = 0; i < 12; i++){
-            if (r_idx_array[i] != 12) {
-              localpressedKeysMin &= ~(1<<r_idx_array[i]);
-            }
-            else{
-              break;
-            }
-          }
-        }
-        else if(sender){
-            for (uint8_t i = 0; i < 12; i++){
-              //Store the released keys in the TX_Message to be received by the receiver
-              if (r_idx_array[i] != 12) {
-                TX_Message[0] = 'R';
-                TX_Message[1] = octave_s;
-                TX_Message[2] = r_idx_array[i];
-                TX_Message[3] = pos;        
-                xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
-              }
-              else{
-                break;
+            if(receiver){
+              for (uint8_t i = 0; i < 12; i++){
+                if (r_idx_array[i] != 12) {
+                  localpressedKeysMin &= ~(1<<r_idx_array[i]);
+                }
+                else{
+                  break;
+                }
               }
             }
-        }
+            else if(sender){
+                for (uint8_t i = 0; i < 12; i++){
+                  //Send released keys to receiver
+                  if (r_idx_array[i] != 12) {
+                    TX_Message[0] = 'R';
+                    TX_Message[1] = octave;
+                    TX_Message[2] = r_idx_array[i];
+                    TX_Message[3] = pos;        
+                    xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+                  }
+                  else{
+                    break;
+                  }
+                }
+            }
       }
       prevPressedKeys = onehot;
       prevMaxOct = maxOct;
@@ -947,16 +940,22 @@ void scanKeysTask(void * pvParameters) {
       // Serial.printf("Keys %hu\n",localpressedKeysArrayMaj);
       if (sender){
         if (pos == 1){
-          __atomic_store_n(&tremolo_s, localTremolo_s, __ATOMIC_RELAXED);
-          __atomic_store_n(&vibrato_s, localVibrato_s, __ATOMIC_RELAXED);
+          __atomic_store_n(&tremolo, localTremolo, __ATOMIC_RELAXED);
+          __atomic_store_n(&vibrato, localVibrato, __ATOMIC_RELAXED);
 
+        }
+        if (pos == 2){
+          __atomic_store_n(&A, localA, __ATOMIC_RELAXED);
+          __atomic_store_n(&D, localD, __ATOMIC_RELAXED);
+          __atomic_store_n(&S, localS, __ATOMIC_RELAXED);
+          __atomic_store_n(&R, localR, __ATOMIC_RELAXED);
         }
       }
       if (receiver){
         __atomic_store_n(&pressedKeysMin, localpressedKeysMin, __ATOMIC_RELAXED);
-        __atomic_store_n(&currentnote, localnote, __ATOMIC_RELAXED);
-        __atomic_store_n(&currentsharp, localsharp, __ATOMIC_RELAXED);
       }
+      __atomic_store_n(&currentnote, localnote, __ATOMIC_RELAXED);
+      __atomic_store_n(&currentsharp, localsharp, __ATOMIC_RELAXED);
   }
   #else
     uint8_t localprevkey = -1;
@@ -1033,8 +1032,6 @@ void displayUpdateTask(void * pvParameters){
     vTaskDelayUntil( &xLastWakeTime, xFrequency );
     u8g2.clearBuffer();         // clear the internal memory
     u8g2.setFont(u8g2_font_courB08_tr); // choose a suitable font
-    // u8g2.setCursor(100,20);
-    // u8g2.print(pos,DEC);
     if (receiver){
       uint8_t x, y;
       u8g2.drawStr(80,8,"Wave(K2):");
@@ -1046,7 +1043,7 @@ void displayUpdateTask(void * pvParameters){
       u8g2.drawStr(80, 32, "K3");
       u8g2.drawStr(116, 32, "K4");
       u8g2.setCursor(2,2);
-      switch (wave_r){
+      switch (wave){
         case 0:
               u8g2.drawLine(82,20,100,10);
               u8g2.drawLine(100,10,100,20);
@@ -1080,69 +1077,76 @@ void displayUpdateTask(void * pvParameters){
       u8g2.print(currentnote);
       u8g2.print(currentsharp);
       u8g2.setCursor(50,16);
-      if (volume_r==8){
+      if (volume==8){
         u8g2.drawStr(58, 15,"max");
       }
-      else if (volume_r==0){
+      else if (volume==0){
           u8g2.drawStr(58, 15,"min");
       }
-      u8g2.print(volume_r,DEC);
+      u8g2.print(volume,DEC);
       u8g2.setCursor(50,24);
-      if (octave_r==8){
+      if (octave==8){
         u8g2.drawStr(58, 23,"max");
       }
-      else if (octave_r==0){
+      else if (octave==0){
           u8g2.drawStr(58, 23,"min");
       }
-      u8g2.print(octave_r,DEC);
+      u8g2.print(octave,DEC);
     }
 
     if (sender){
+          u8g2.drawStr(2, 15,"Oct:");
+          u8g2.drawStr(2, 6,"Note:");
+          u8g2.setCursor(32,6);
+          u8g2.print(currentnote);
+          u8g2.print(currentsharp);
+          u8g2.setCursor(27,15);
+          u8g2.print(octave,DEC);
       if (pos == 1){
           u8g2.drawStr(2, 32, "K1");  
           u8g2.drawStr(39, 32, "K2");
           u8g2.drawStr(80, 32, "K3");
           u8g2.drawStr(116, 32, "K4");
-          u8g2.drawStr(2, 15,"Oct:");
-          u8g2.drawStr(2, 6,"Note:");
-          u8g2.drawStr(48, 6,"Vibrato(K3):");
-          u8g2.drawStr(48, 15,"Tremolo(K4):");
-          u8g2.setCursor(27,15);
-          u8g2.print(octave_s,DEC);
-          u8g2.setCursor(32,6);
-          // u8g2.print(currentnote_s);
-          // u8g2.print(currentsharp_s);
+          u8g2.drawStr(48, 6,"Vib(K3):");
+          u8g2.drawStr(48, 15,"Trem(K4):");
           u8g2.setCursor(120,6);
-          u8g2.print(vibrato_s,DEC);
+          u8g2.print(vibrato,DEC);
           u8g2.setCursor(120,15);
-          u8g2.print(tremolo_s,DEC);
+          u8g2.print(tremolo,DEC);
+      }
+      if (pos == 2){
+          u8g2.drawStr(2, 32,"A");
+          u8g2.drawStr(44, 32, "D");
+          u8g2.drawStr(85, 32, "S");
+          u8g2.drawStr(122, 32, "R");
+
+
+          u8g2.setCursor(2,24);
+          u8g2.print(A,DEC);
+
+          u8g2.setCursor(44,24);
+          u8g2.print(D,DEC);
+
+          u8g2.setCursor(85,24);
+          u8g2.print(S,DEC);
+
+          u8g2.setCursor(122,24);
+          u8g2.print(R,DEC);
+
+
+          int attackEnd = map(A, 0, 255, 0, 40);
+          int decayEnd = map(D, 0, 255, 0, 15);
+          int sustainEnd = map(S, 0, 255, 0, 14);
+          int releaseEnd = map(R, 0, 255, 0, 40);
+      
+          // Draw the ADSR envelope
+          u8g2.drawLine(45, 15, attackEnd+45, 2);  // Attack segment
+          u8g2.drawLine(attackEnd+45, 2,(attackEnd+45)+ decayEnd, 15 - sustainEnd);  // Decay segment
+          u8g2.drawLine((attackEnd+45)+ decayEnd, 13 - sustainEnd, 80, 13 - sustainEnd);  // Sustain segment
+          u8g2.drawLine(80, 13-sustainEnd, 80+releaseEnd, 15);  // Release segment
       }
 
-      // u8g2.drawStr(2, 15,"Vol:");
-      // u8g2.drawStr(2, 23,"Oct:");
-      // // u8g2.drawStr(2, 6,"Note:");
-      // u8g2.setCursor(35,10);
-      // // u8g2.print(currentnote);
-      // // u8g2.print(currentsharp);
-      // u8g2.setCursor(25,16);
-      // if (volume_s==8){
-      //   u8g2.drawStr(33, 15,"max");
-      // }
-      // else if (volume_s==0){
-      //     u8g2.drawStr(33, 15,"min");
-      // }
-      // u8g2.print(volume_s,DEC);
-      // u8g2.setCursor(25,24);
-      // if (octave_s==8){
-      //   u8g2.drawStr(33, 23,"max");
-      // }
-      // else if (octave_s==0){
-      //     u8g2.drawStr(33, 23,"min");
-      // }
-      // u8g2.print(octave_s,DEC);
-
     }
-
     u8g2.sendBuffer();          
     //Toggle LED
     digitalToggle(LED_BUILTIN);
@@ -1360,7 +1364,7 @@ void setup() {
 
   pressedKeysArrayMutex = xSemaphoreCreateMutex();
   sampleBufferMutex = xSemaphoreCreateBinary();
-  for(uint8_t i =0; i<SAMPLE_BUFFER_SIZE; i++){
+  for(uint8_t i =0; i<128; i++){
     sampleBuffer0[i] = 0;
     sampleBuffer1[i] = 0;
   }

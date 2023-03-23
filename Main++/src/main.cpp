@@ -1389,6 +1389,27 @@ void setup() {
     &CAN_TX_TaskHandle);
   #endif
 
+  #ifdef TEST_SEND_SOUND
+    TaskHandle_t sendSoundTaskHandle = NULL;
+      xTaskCreate(
+      sendSoundTask,		/* Function that implements the task */
+      "sendSound",		/* Text name for the task */
+      256,      		/* Stack size in words, not bytes */
+      NULL,			/* Parameter passed into the task */
+      4,			/* Task priority */ 
+      &sendSoundTaskHandle);
+  #endif
+
+  #ifdef TEST_ISR
+    TaskHandle_t ISRTaskHandle = NULL;
+      xTaskCreate(
+      ISRTask,		/* Function that implements the task */
+      "ISRTaskUpdate",		/* Text name for the task */
+      256,      		/* Stack size in words, not bytes */
+      NULL,			/* Parameter passed into the task */
+      5,			/* Task priority */
+      &ISRTaskHandle );
+  #endif
   pressedKeysArrayMutex = xSemaphoreCreateMutex();
   sampleBufferMutex = xSemaphoreCreateBinary();
   for(uint8_t i =0; i<128; i++){

@@ -1,8 +1,11 @@
 # Embedded Systems Coursework 2 Report
 
 ## Features of our synthesizer:
-- feature 1
-- feature 2
+
+Our synthesizer has multtiple features, all of which are listed below:
+
+- LFO: Our synthesizer contains a Low Frequency Oscillator, designed to produce both Vibrato and Tremolo effects. Vibrato is a form of frequency modulation while Tremolo is a form of amplitude modulation
+- ADSR: 
 
 
     

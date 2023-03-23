@@ -186,23 +186,34 @@ uint32_t LFOTremolo(uint8_t i) {
 
 void auto_detect(bool west, bool east){
   if(!west){ //most west module
-    pos = 0;
-    receiver = true;
-    sender = false;
+    uint8_t locpos = 0;
+    bool locreceiver = true;
+    bool locsender = false;
     if(east){ // >=2 modules
-      singleton = false;
+      bool locSingleton = false;
       uint8_t TX_Message[8] = {'H',pos,octave_r,volume_r,wave_r,0,0,0}; //Handshake, position, 0, 0, 0, 0, 0, 0
       xQueueSend(msgOutQ, TX_Message, 0);
+      __atomic_store_n(&singleton, locSingleton,__ATOMIC_RELAXED);
     }
     else{
-      maxOct=8;
-      singleton = true;
+      uint8_t locMaxOct=8;
+      uint8_t locSingleton = true;
+      __atomic_store_n(&maxOct, locMaxOct,__ATOMIC_RELAXED);
+      __atomic_store_n(&singleton, locSingleton,__ATOMIC_RELAXED);
     }
+    __atomic_store_n(&pos, locpos,__ATOMIC_RELAXED);
+    __atomic_store_n(&receiver, locreceiver,__ATOMIC_RELAXED);
+    __atomic_store_n(&sender, locsender,__ATOMIC_RELAXED);
+
+
   }
   else{
-    sender = true; //either east or middle 2/3 modules
-    receiver = false;
-    singleton = false;
+    bool locsender = true; //either east or middle 2/3 modules
+    bool locreceiver = false;
+    bool locsingleton = false;
+    __atomic_store_n(&receiver, locreceiver,__ATOMIC_RELAXED);
+    __atomic_store_n(&singleton, locsingleton,__ATOMIC_RELAXED);
+    __atomic_store_n(&sender, locsender,__ATOMIC_RELAXED);
   }
 }
 
@@ -374,11 +385,10 @@ void ISRTask(void *pvParameters) {
           }
           polyphony_vout = polyphony_vout >> (8 - vol);
           polyphony_vout = max(-128, min(127, (int)polyphony_vout));
-            uint32_t lol = polyphony_vout;//Calculate one sample
             if (writeBuffer1)
-              sampleBuffer1[writeCtr] = lol + 128;
+              sampleBuffer1[writeCtr] = polyphony_vout + 128;
             else
-              sampleBuffer0[writeCtr] = lol + 128;
+              sampleBuffer0[writeCtr] = polyphony_vout + 128;
             
             vout_r = polyphony_vout;
       }
@@ -481,23 +491,29 @@ void recieverTask(){
   if (RX_Message[0] == 'R'){
     if(RX_Message[3] == 1){
       localpressedKeysMin &= ~(1 << (12+RX_Message[2]));
+  __atomic_store_n(&pressedKeysMin, localpressedKeysMin,__ATOMIC_RELAXED);
+
     }
     else if(RX_Message[3] == 2){
       localpressedKeysMaj &= ~(1 << RX_Message[2]);
+  __atomic_store_n(&pressedKeysMaj, localpressedKeysMaj,__ATOMIC_RELAXED);
+
     }
   }
   //If key is pressed set to correct step size
   else if (RX_Message[0] == 'P'){
     if(RX_Message[3] == 1){
       localpressedKeysMin |= (1 << (12+RX_Message[2]));
+  __atomic_store_n(&pressedKeysMin, localpressedKeysMin,__ATOMIC_RELAXED);
     }
     else if(RX_Message[3] == 2){
       localpressedKeysMaj |= (1 << RX_Message[2]);
-      Serial.println ("Maj: "+String(localpressedKeysMaj));
+  __atomic_store_n(&pressedKeysMaj, localpressedKeysMaj,__ATOMIC_RELAXED);
+
+      // Serial.println ("Maj: "+String(localpressedKeysMaj));
     }
   }
   else if (RX_Message[0] == 'M'){
-    Serial.println ("Received maxOct: "+String(RX_Message[1]));
     uint8_t localmaxOct = 8-RX_Message[1];
     __atomic_store_n(&maxOct, localmaxOct,__ATOMIC_RELAXED);
   }
@@ -510,16 +526,17 @@ void recieverTask(){
 
   // Serial.printf("keys recieved %hu\n", localpressedKeysArrayMaj);
   //Write step size to the pressedKeys array to play it
-  __atomic_store_n(&pressedKeysMin, localpressedKeysMin,__ATOMIC_RELAXED);
-  __atomic_store_n(&pressedKeysMaj, localpressedKeysMaj,__ATOMIC_RELAXED);
 }
 
 void senderTask(){
 //Message received is handshake 
   if (RX_Message[0] == 'H'){
-    pos = RX_Message[1] + 1;
-    octave_s = RX_Message[2] + 1;
-    volume_s = RX_Message[3];
+    uint8_t locpos = RX_Message[1] + 1;
+    uint8_t lococtave_s = RX_Message[2] + 1;
+    uint8_t locvolume_s = RX_Message[3];
+    __atomic_store_n(&pos, locpos, __ATOMIC_RELAXED);
+    __atomic_store_n(&octave_s, lococtave_s, __ATOMIC_RELAXED);
+    __atomic_store_n(&volume_s, locvolume_s, __ATOMIC_RELAXED);
 
     xSemaphoreTake(keyArrayMutex, portMAX_DELAY);
       for (uint8_t i=5; i<7; i++) {
@@ -540,7 +557,6 @@ void senderTask(){
       xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
     }
     else{
-      Serial.println("Here");
       uint8_t TX_Message[8] = {'M',pos, 0, 0, 0, 0, 0, 0};
       xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
     }
@@ -646,8 +662,6 @@ void sendSoundTask (void * pvParameters) {
       xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
       // Serial.printf("Sending: %d\n", TX_Message[4]<<24 | TX_Message[3]<<16 | TX_Message[2]<<8 | TX_Message[1]);
     }
-    else {
-    }
     prevPressed = localPressedKeys;
   }
   #else
@@ -688,21 +702,18 @@ void scanKeysTask(void * pvParameters) {
     uint8_t prevTremolo = 0;
     uint32_t localstepsize = 0;
 
-    char localnote = currentnote;
-    char localsharp = currentsharp;
-    uint8_t localvolume_r = volume_r;
-    uint8_t localoctave_r= octave_r;
-    uint8_t localwave_r = wave_r;
-    uint8_t localTremolo_s = tremolo_s;
-    uint8_t localVibrato_s = vibrato_s;
-    uint8_t localTremolo_r = tremolo_r;
-    uint8_t localVibrato_r = vibrato_r;
-    uint32_t localpressedKeysMin = pressedKeysMin;
-    uint32_t localpressedKeysMaj = pressedKeysMaj;
-    uint8_t localkeyArray[7] = {0};
-
     while(1){
-        vTaskDelayUntil( &xLastWakeTime, xFrequency );
+         vTaskDelayUntil(&xLastWakeTime, xFrequency);
+          char localnote = currentnote;
+          char localsharp = currentsharp;
+          uint8_t localvolume_r = volume_r;
+          uint8_t localoctave_r= octave_r;
+          uint8_t localwave_r = wave_r;
+          uint8_t localTremolo_s = tremolo_s;
+          uint8_t localVibrato_s = vibrato_s;
+          uint32_t localpressedKeysMin = pressedKeysMin;
+          uint32_t localpressedKeysMaj = pressedKeysMaj;
+          uint8_t localkeyArray[7] = {0};
         //Get keys info
         for (uint8_t i = 0; i < 7; i++){
           setRow(i);
@@ -771,15 +782,18 @@ void scanKeysTask(void * pvParameters) {
 
           //Send Knob info to other modules if something changed
           if (!singleton && (localoctave_r != prevOctave || localvolume_r != prevVolume || localwave_r != prevWave)){
-            Serial.println ("cur octave: "+String(localoctave_r)+" cur volume: "+String(localvolume_r));
+            // Serial.println ("cur octave: "+String(localoctave_r)+" cur volume: "+String(localvolume_r));
             TX_Message[0] = 'K';
             TX_Message[2] = localoctave_r;
             TX_Message[3] = localvolume_r;
             TX_Message[4] = localwave_r;
-            TX_Message[5] = localTremolo_r;
-            TX_Message[6] = localVibrato_r;
-
+            TX_Message[5] = tremolo_r;
+            TX_Message[6] = vibrato_r;
+            __atomic_store_n(&volume_r, localvolume_r, __ATOMIC_RELAXED);
+            __atomic_store_n(&octave_r, localoctave_r, __ATOMIC_RELAXED);
+            __atomic_store_n(&wave_r, localwave_r, __ATOMIC_RELAXED);
             xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
+
           }
         }
         if (sender){
@@ -796,9 +810,6 @@ void scanKeysTask(void * pvParameters) {
               TX_Message[2] = localVibrato_s;
               xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
             }
-
-
-
           }
         }
         prevWave = localwave_r;
@@ -930,20 +941,17 @@ void scanKeysTask(void * pvParameters) {
       prevMaxOct = maxOct;
       // Serial.printf("PressedKeys %hu\n",pressedKeysArray);
       // Serial.printf("Keys %hu\n",localpressedKeysArrayMaj);
-      if (sender){
-        if (pos == 1){
-          __atomic_store_n(&tremolo_s, localTremolo_s, __ATOMIC_RELAXED);
-          __atomic_store_n(&vibrato_s, localVibrato_s, __ATOMIC_RELAXED);
+      // if (sender){
+      //   if (pos == 1){
+      //     __atomic_store_n(&tremolo_s, localTremolo_s, __ATOMIC_RELAXED);
+      //     __atomic_store_n(&vibrato_s, localVibrato_s, __ATOMIC_RELAXED);
 
-        }
-      }
+      //   }
+      // }
       if (receiver){
         __atomic_store_n(&pressedKeysMin, localpressedKeysMin, __ATOMIC_RELAXED);
         __atomic_store_n(&currentnote, localnote, __ATOMIC_RELAXED);
         __atomic_store_n(&currentsharp, localsharp, __ATOMIC_RELAXED);
-        __atomic_store_n(&volume_r, localvolume_r, __ATOMIC_RELAXED);
-        __atomic_store_n(&octave_r, localoctave_r, __ATOMIC_RELAXED);
-        __atomic_store_n(&wave_r, localwave_r, __ATOMIC_RELAXED);
       }
   }
   #else
@@ -1096,7 +1104,7 @@ void displayUpdateTask(void * pvParameters){
           u8g2.drawStr(48, 6,"Vibrato(K3):");
           u8g2.drawStr(48, 15,"Tremolo(K4):");
           u8g2.setCursor(27,15);
-          u8g2.print(octave_r,DEC);
+          u8g2.print(octave_s,DEC);
           u8g2.setCursor(32,6);
           // u8g2.print(currentnote_s);
           // u8g2.print(currentsharp_s);
@@ -1105,28 +1113,29 @@ void displayUpdateTask(void * pvParameters){
           u8g2.setCursor(120,15);
           u8g2.print(tremolo_s,DEC);
       }
-      u8g2.drawStr(2, 15,"Vol:");
-      u8g2.drawStr(2, 23,"Oct:");
-      // u8g2.drawStr(2, 6,"Note:");
-      u8g2.setCursor(35,10);
-      // u8g2.print(currentnote);
-      // u8g2.print(currentsharp);
-      u8g2.setCursor(25,16);
-      if (volume_s==8){
-        u8g2.drawStr(33, 15,"max");
-      }
-      else if (volume_s==0){
-          u8g2.drawStr(33, 15,"min");
-      }
-      u8g2.print(volume_s,DEC);
-      u8g2.setCursor(25,24);
-      if (octave_s==8){
-        u8g2.drawStr(33, 23,"max");
-      }
-      else if (octave_s==0){
-          u8g2.drawStr(33, 23,"min");
-      }
-      u8g2.print(octave_s,DEC);
+
+      // u8g2.drawStr(2, 15,"Vol:");
+      // u8g2.drawStr(2, 23,"Oct:");
+      // // u8g2.drawStr(2, 6,"Note:");
+      // u8g2.setCursor(35,10);
+      // // u8g2.print(currentnote);
+      // // u8g2.print(currentsharp);
+      // u8g2.setCursor(25,16);
+      // if (volume_s==8){
+      //   u8g2.drawStr(33, 15,"max");
+      // }
+      // else if (volume_s==0){
+      //     u8g2.drawStr(33, 15,"min");
+      // }
+      // u8g2.print(volume_s,DEC);
+      // u8g2.setCursor(25,24);
+      // if (octave_s==8){
+      //   u8g2.drawStr(33, 23,"max");
+      // }
+      // else if (octave_s==0){
+      //     u8g2.drawStr(33, 23,"min");
+      // }
+      // u8g2.print(octave_s,DEC);
 
     }
 
@@ -1252,7 +1261,7 @@ void setup() {
     "scanKeys",		/* Text name for the task */
     64,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
+    6,			/* Task priority */
     &scanKeysHandle );  /* Pointer to store the task handle */
 
     TaskHandle_t displayUpdateTaskHandle = NULL;
@@ -1270,7 +1279,7 @@ void setup() {
     "ISRTaskUpdate",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    2,			/* Task priority */
+    3,			/* Task priority */
     &ISRTaskHandle );
     
     TaskHandle_t decodeTaskHandle = NULL;
@@ -1279,7 +1288,7 @@ void setup() {
     "decode",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    1,			/* Task priority */
+    2,			/* Task priority */
     &decodeTaskHandle);
 
     TaskHandle_t CAN_TX_TaskHandle = NULL;
@@ -1288,7 +1297,7 @@ void setup() {
     "CanTX",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    1,			/* Task priority */
+    2,			/* Task priority */
     &CAN_TX_TaskHandle);
 
     TaskHandle_t sendSoundTaskHandle = NULL;
@@ -1297,7 +1306,7 @@ void setup() {
     "sendSound",		/* Text name for the task */
     256,      		/* Stack size in words, not bytes */
     NULL,			/* Parameter passed into the task */
-    1,			/* Task priority */ 
+    2,			/* Task priority */ 
     &sendSoundTaskHandle);
   #endif
 
@@ -1347,6 +1356,10 @@ void setup() {
 
   pressedKeysArrayMutex = xSemaphoreCreateMutex();
   sampleBufferMutex = xSemaphoreCreateBinary();
+  for(uint8_t i =0; i<SAMPLE_BUFFER_SIZE; i++){
+    sampleBuffer0[i] = 0;
+    sampleBuffer1[i] = 0;
+  }
   xSemaphoreGive(sampleBufferMutex);
   keyArrayMutex = xSemaphoreCreateMutex();
   CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
@@ -1387,25 +1400,6 @@ void setup() {
   setOutMuxBit(DRST_BIT, HIGH);  //Release display logic reset
   u8g2.begin();
   setOutMuxBit(DEN_BIT, HIGH);  //Enable display power supply
-
-  uint32_t id_0 = HAL_GetUIDw0();
-  uint32_t id_1 = HAL_GetUIDw1();
-  uint32_t id_2 = HAL_GetUIDw2();
-
-  uint16_t id_0_half = (id_0 >> 16) ^ (id_0 & 0x00FF);
-  uint16_t id_1_half = (id_1 >> 16) ^ (id_1 & 0x00FF);
-  uint16_t id_2_half = (id_2 >> 16) ^ (id_2 & 0x00FF);
-
-  uint8_t id_0_byte = (id_0_half >> 8) ^ (id_0_half & 0x00FF);
-  uint8_t id_1_byte = (id_1_half >> 8) ^ (id_1_half & 0x00FF);
-  uint8_t id_2_byte = (id_2_half >> 8) ^ (id_2_half & 0x00FF);
-
-  uint8_t id = id_0_byte ^ id_1_byte ^ id_2_byte;
-
-  Serial.print("ID: ");
-  Serial.print(id_0, HEX);
-  Serial.print(id_1, HEX);
-  Serial.println(id_2, HEX);
 
   bool outBits[7] = {0,0,0,1,1,1,1};
 

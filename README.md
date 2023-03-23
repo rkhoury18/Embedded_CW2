@@ -1,15 +1,16 @@
 # Embedded Systems Coursework 2 Report
 ---
 ## Features of our synthesizer:
-    - feature 1
-    - feature 2
+- feature 1
+- feature 2
 
-        [Timing and CPU analysis of our synthesizer](doc/CPUanalysisandtiming.md)
-        [How to use our synthesizer](doc/howtouse.md)
+    [Timing and CPU analysis of our synthesizer](doc/CPUanalysisandtiming.md)
+    
+    [How to use our synthesizer](doc/howtouse.md)
 
-    ```sh
+```sh
 
-    ```
+```
     
 ## _The Last Markdown Editor, Ever_
 

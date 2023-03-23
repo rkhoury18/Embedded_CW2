@@ -2,13 +2,13 @@
 
 ## Features of our synthesizer:
 
-Our synthesizer has multtiple features, all of which are listed below:
+Our synthesizer includes multiple features, all of which are listed below:
 
 - **LFO:** Our synthesizer contains a Low Frequency Oscillator, designed to produce both Vibrato and Tremolo effects. Vibrato is a form of frequency modulation while Tremolo is a form of amplitude modulation
 - **Waveform selection:** The user is able to change the Timbre of the sound produced by selecting A square, traingle, saw-tooth or Sine wave waveform.
 - **Polyphony:** The user can select multiple tones to be played simeltaneously. 
 - **User Interface:** Our sytnehsizer containes a intuitive User Interface. Different information is displayed depending on the number of Keyboards connected. 
-    - Master Keyboard: Displays selected volume and octave level, key being pressed and waveform being produced. The waveform it self is shown graphically, aiding the user's experience.
+    - Master Keyboard: Displays selected volume and octave level, current key being pressed and waveform being produced. The waveform it self is shown graphically, aiding the user's experience. If more than one key is pressed, the last key pressed is displayed. 
     - 2nd Keyboard: Displays the note and octave band being played on the 2nd keyboard, and the LFO's tremolo and vibrato values 
     - 3rd Keyboard: Displays  the note and octave band being played on the 3rd keyboard in addition to the A, D, S and R values for the synthesizers ADSR. These ADSR values are displayed alongside a dynamic visualization of the ADSR envolpe, who's slope's change depending on selected ADSR values. This aids the user's ability to select the required envelope.  on the third connected keyboard. 
     - Note: The Octave level for each Keyboard is also dynamically allocated. If 3 keyboards are connected, the maximum octave level of the master keyboard is automatically set to 6, as the 2nd and 3rd keyboard are set to octave band 7 and 8 respectively. 

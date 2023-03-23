@@ -4,9 +4,24 @@
 - feature 1
 - feature 2
 
-[Timing and CPU analysis of our synthesizer](doc/CPUanalysisandtiming.md)
+
     
+
+
+
+##Analysis:
+---
+[Timing and CPU analysis of our synthesizer](doc/CPUanalysisandtiming.md)
+
+
+
+
+##User Manual:
+---
 [How to use our synthesizer](doc/howtouse.md)
+
+
+
 
 ```sh
 

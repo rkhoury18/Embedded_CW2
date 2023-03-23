@@ -8,11 +8,8 @@ Our synthesizer has multtiple features, all of which are listed below:
 - Waveform selection: The user is able to change the Timbre of the sound produced by selecting A square, traingle, saw-tooth or Sine wave waveform.
 - Polyphony: The user can select multiple tones to be played simeltaneously. 
 - User Interface: Our sytnehsizer containes a intuitive User Interface, displaying selected volume and octave, Key being pressed and waveform being produced. 
-- Key-board auto-detect: Our synthesizer allows the user to cascade multipkle keyboards, in any order. By default, the left most keyboard will be the master keyboard, while 
-
-*synch issues --> reset needed
- 
- key-board autodetect,  stereo sound, 
+- Key-board auto-detect: Our synthesizer allows the user to cascade multipkle keyboards, in any order. By default, the left most keyboard will be the master keyboard, while each succesive keyboard to the masters right will be 1 octave higher. Keboards can be disconnected and reconnected while playing, however, some synchronization erros might appear. This would require the user to rest the board using the reset button. 
+- Stereo: When the user uses 
 
 
 ## Analysis:

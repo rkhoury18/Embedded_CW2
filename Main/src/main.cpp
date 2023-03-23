@@ -1110,7 +1110,7 @@ void displayUpdateTask(void * pvParameters){
           else if (octave==0){
               u8g2.drawStr(33, 15,"min");
           }
-      if (pos == 2){
+      if (pos == 1){
           u8g2.drawStr(2, 32, "K1");  
           u8g2.drawStr(39, 32, "K2");
           u8g2.drawStr(80, 32, "K3");
@@ -1122,7 +1122,7 @@ void displayUpdateTask(void * pvParameters){
           u8g2.setCursor(115,19);
           u8g2.print(tremolo,DEC);
       }
-      if (pos == 1){
+      if (pos == 2){
           u8g2.drawStr(2, 32,"A");
           u8g2.drawStr(44, 32, "D");
           u8g2.drawStr(85, 32, "S");

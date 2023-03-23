@@ -67,9 +67,9 @@ SemaphoreHandle_t sampleBufferMutex;
   BaseType_t xHigherPriorityTaskWoken = pdTRUE;
 
   //Receiver and sender variables
-  volatile uint8_t octave;
-  volatile uint8_t volume;
-  volatile uint8_t wave;
+  volatile uint8_t octave = 4;
+  volatile uint8_t volume = 4;
+  volatile uint8_t wave = 0;
   volatile int32_t vout = 0;
   volatile uint32_t maj_s = 0;
   volatile uint32_t min_s = 0;
@@ -247,9 +247,11 @@ void ISRTask(void *pvParameters) {
     uint8_t localvibrato = vibrato;
     if(receiver){
       pressedKeysArray = ((((uint64_t)pressedKeysMaj) << 24) | pressedKeysMin);
+      baseoct = octave - 4;
     }
     else if(sender){
       pressedKeysArray = ((uint64_t)maj_s) << 24 | min_s;
+      baseoct = octave - pos - 4;
     }  
     for (uint8_t i=0; i<36; i++){
         if ((pressedKeysArray >> i) & 0x1){
@@ -684,7 +686,7 @@ void scanKeysTask(void * pvParameters) {
           char localnote = currentnote;
           char localsharp = currentsharp;
           uint8_t localvolume = volume;
-          uint8_t localoctave= octave;
+          uint8_t localoctave = octave;
           uint8_t localwave = wave;
           uint8_t localTremolo = tremolo;
           uint8_t localVibrato = vibrato;
@@ -887,7 +889,7 @@ void scanKeysTask(void * pvParameters) {
                 //Send to receiver if key pressed
                 if (p_idx_array[i] != 12) {
                   TX_Message[0] = 'P';
-                  TX_Message[1] = octave;
+                  TX_Message[1] = localoctave;
                   TX_Message[2] = p_idx_array[i];
                   TX_Message[3] = pos;   
                   xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);
@@ -923,7 +925,7 @@ void scanKeysTask(void * pvParameters) {
                   //Send released keys to receiver
                   if (r_idx_array[i] != 12) {
                     TX_Message[0] = 'R';
-                    TX_Message[1] = octave;
+                    TX_Message[1] = localoctave;
                     TX_Message[2] = r_idx_array[i];
                     TX_Message[3] = pos;        
                     xQueueSend(msgOutQ, TX_Message, portMAX_DELAY);

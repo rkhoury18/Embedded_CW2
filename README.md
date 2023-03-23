@@ -24,7 +24,7 @@ Our synthesizer includes multiple base and advanced features, all of which are l
     - Note: The Octave level for each Keyboard is also dynamically allocated. If 3 keyboards are connected, the maximum octave level of the master keyboard is automatically set to 6, as the 2nd and 3rd keyboard are set to octave band 7 and 8 respectively. 
 - **Key-board auto-detect:** Our synthesizer allows the user to cascade multiple keyboards, in any order. By default, the left most keyboard will be the master keyboard, while each succesive keyboard to the masters right will be 1 octave higher. Keboards can be disconnected and reconnected while playing, however, some synchronization erros might appear. This would require the user to rest the board using the reset button. 
 - **Stereo:** When the user uses multiple keyboards, each of the speakers connected are also employed. This enable the Stereo effect, where the resulting sound is given more depth. 
-- **Double Buffer**
+- **Double Buffer**: Given our advanced features, we need to perform quite a few calculations throughout our program. This adds delay's that are perceivable by the user, and distorts the order in which sound is produced. To regulate this effect , lots of calc due to LFO, lots of calc before we get a vout --> douvle buffer stores these values for them to be succesively played --> 2 buffers, one read one write, switching around every cycle . 
 
 
 ## Analysis:

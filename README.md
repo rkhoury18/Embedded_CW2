@@ -30,7 +30,7 @@ Our synthesizer has multtiple features, all of which are listed below:
     The report shall contain: 
     - An identification of all the tasks that are performed by the system with their method of implementation, thread or interrupt
     - A characterisation of each task with its theoretical minimum initiation interval and measured maximum execution time
-    - A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are metunder worst-case conditions. 
+    - A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are met under worst-case conditions. 
     - A quantification of total CPU utilisation. 
     - An identification of all the shared data structures and the methods used to guarantee safe accessand synchronisation.
     - An analysis of inter-task blocking dependencies that shows any possibility of deadlock

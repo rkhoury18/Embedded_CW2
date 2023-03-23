@@ -28,8 +28,8 @@ Our synthesizer has multtiple features, all of which are listed below:
     The report shall be presented as documentation in the GitHub repository for your code, con-sisting of one or more markdown files linked to a table of contents
     
     The report shall contain: 
-    - An identification of all the tasks that are performed by the system with their method of imple-mentation, thread or interrupt
-    - A characterisation of each task with its theoretical minimum initiation interval and measuredmaximum execution time
+    - An identification of all the tasks that are performed by the system with their method of implementation, thread or interrupt
+    - A characterisation of each task with its theoretical minimum initiation interval and measured maximum execution time
     - A critical instant analysis of the rate monotonic scheduler, showing that all deadlines are metunder worst-case conditions. 
     - A quantification of total CPU utilisation. 
     - An identification of all the shared data structures and the methods used to guarantee safe accessand synchronisation.

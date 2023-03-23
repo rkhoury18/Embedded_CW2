@@ -938,28 +938,26 @@ void displayUpdateTask(void * pvParameters){
     }
 
     if (sender){
-      u8g2.drawStr(2, 15,"Vol:");
-      u8g2.drawStr(2, 23,"Oct:");
-      // u8g2.drawStr(2, 6,"Note:");
-      u8g2.setCursor(35,10);
-      // u8g2.print(currentnote);
-      // u8g2.print(currentsharp);
-      u8g2.setCursor(25,16);
-      if (volume_s==8){
-        u8g2.drawStr(33, 15,"max");
+    if (sender){
+      if (pos == 1){
+          u8g2.drawStr(2, 32, "K1");  
+          u8g2.drawStr(39, 32, "K2");
+          u8g2.drawStr(80, 32, "K3");
+          u8g2.drawStr(116, 32, "K4");
+          u8g2.drawStr(2, 15,"Oct:");
+          u8g2.drawStr(2, 6,"Note:");
+          u8g2.drawStr(48, 6,"Vibrato(K3):");
+          u8g2.drawStr(48, 15,"Tremolo(K4):");
+          u8g2.setCursor(27,15);
+          u8g2.print(octave_s,DEC);
+          u8g2.setCursor(32,6);
+          // u8g2.print(currentnote_s);
+          // u8g2.print(currentsharp_s);
+          u8g2.setCursor(120,6);
+          // u8g2.print(vibrato_s,DEC);
+          u8g2.setCursor(120,15);
+          // u8g2.print(tremolo_s,DEC);
       }
-      else if (volume_s==0){
-          u8g2.drawStr(33, 15,"min");
-      }
-      u8g2.print(volume_s,DEC);
-      u8g2.setCursor(25,24);
-      if (octave_s==8){
-        u8g2.drawStr(33, 23,"max");
-      }
-      else if (octave_s==0){
-          u8g2.drawStr(33, 23,"min");
-      }
-      u8g2.print(octave_s,DEC);
 
     }
 

@@ -73,7 +73,7 @@ SemaphoreHandle_t sampleBufferMutex;
   volatile int32_t vout_s = 0;
   volatile uint32_t maj_s = 0;
   volatile uint32_t min_s = 0;
-  volatile uint8_t vibrato_s = 0; // Ints from [0, 20]
+  volatile uint8_t vibrato_s = 10; // Ints from [0, 20]
   volatile uint8_t tremolo_s = 0; // Ints from [0, 20]
 
 
@@ -82,7 +82,7 @@ SemaphoreHandle_t sampleBufferMutex;
   volatile uint8_t octave_r = 4;
   volatile uint8_t wave_r = 0;
   volatile int32_t vout_r = 0;
-  volatile uint8_t vibrato_r = 0; // Ints from [0, 20]
+  volatile uint8_t vibrato_r = 10; // Ints from [0, 20]
   volatile uint8_t tremolo_r = 0; // Ints from [0, 20]
 
 
@@ -161,12 +161,12 @@ uint32_t LFOVibrato() {
   if (receiver){
     uint32_t time = t_vib_r++;
     uint32_t index = ((time * 4096 * vibrato_r) / 22000 * 128) % 4096;
-    return LFOTable[index];
+    return LFOTable[index] + 8388608;
   }
   if (sender) {
     uint32_t time = t_vib_s++;
     uint32_t index = ((time * 4096 * vibrato_s) / 22000 * 128) % 4096;
-    return LFOTable[index];
+    return LFOTable[index] + 8388608;
   }
 }
             

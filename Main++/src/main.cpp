@@ -575,7 +575,7 @@ void decodeTask(void * pvParameters){
   while(1){
   xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
     if(receiver){
-      recieverTask();
+      receiverTask();
     }
     else if(sender){
       senderTask();
@@ -585,7 +585,7 @@ void decodeTask(void * pvParameters){
   for(int i = 0; i<36; i++){
     xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
     if(receiver){
-      recieverTask();
+      receiverTask();
     }
     else if(sender){
       senderTask();
@@ -1421,8 +1421,6 @@ void setup() {
   CAN_TX_Semaphore = xSemaphoreCreateCounting(3,3);
 
 
-
-
   CAN_Init(false);
   #ifndef DISABLE_THREADS
     CAN_RegisterRX_ISR(CAN_RX_ISR);
@@ -1430,7 +1428,6 @@ void setup() {
   #endif
   setCANFilter(0x123,0x7ff);
   CAN_Start();
-
 
 
   //Set pin directions

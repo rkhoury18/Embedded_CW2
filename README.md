@@ -4,9 +4,9 @@
 - feature 1
 - feature 2
 
-    [Timing and CPU analysis of our synthesizer](doc/CPUanalysisandtiming.md)
+[Timing and CPU analysis of our synthesizer](doc/CPUanalysisandtiming.md)
     
-    [How to use our synthesizer](doc/howtouse.md)
+[How to use our synthesizer](doc/howtouse.md)
 
 ```sh
 

@@ -1086,6 +1086,25 @@ void displayUpdateTask(void * pvParameters){
     }
 
     if (sender){
+      if (pos == 1){
+          u8g2.drawStr(2, 32, "K1");  
+          u8g2.drawStr(39, 32, "K2");
+          u8g2.drawStr(80, 32, "K3");
+          u8g2.drawStr(116, 32, "K4");
+          u8g2.drawStr(2, 15,"Oct:");
+          u8g2.drawStr(2, 6,"Note:");
+          u8g2.drawStr(48, 6,"Vibrato(K3):");
+          u8g2.drawStr(48, 15,"Tremolo(K4):");
+          u8g2.setCursor(27,15);
+          u8g2.print(octave_r,DEC);
+          u8g2.setCursor(32,6);
+          // u8g2.print(currentnote_s);
+          // u8g2.print(currentsharp_s);
+          u8g2.setCursor(120,6);
+          u8g2.print(vibrato_s,DEC);
+          u8g2.setCursor(120,15);
+          u8g2.print(tremolo_s,DEC);
+      }
       u8g2.drawStr(2, 15,"Vol:");
       u8g2.drawStr(2, 23,"Oct:");
       // u8g2.drawStr(2, 6,"Note:");

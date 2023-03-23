@@ -620,7 +620,7 @@ void decodeTask(void * pvParameters){
   xQueueReceive(msgInQ, RX_Message, portMAX_DELAY);
     if(receiver){
       receiverTask();
-}
+    }
     else if(sender){
       senderTask();
     }
@@ -1711,6 +1711,17 @@ void setup() {
     &ISRTaskHandle );
   #endif
 
+  #ifdef TEST_SEND_SOUND
+    TaskHandle_t sendSoundTaskHandle = NULL;
+      xTaskCreate(
+      sendSoundTask,		/* Function that implements the task */
+      "sendSound",		/* Text name for the task */
+      256,      		/* Stack size in words, not bytes */
+      NULL,			/* Parameter passed into the task */
+      4,			/* Task priority */ 
+      &sendSoundTaskHandle);
+  #endif
+
   pressedKeysArrayMutex = xSemaphoreCreateMutex();
   sampleBufferMutex = xSemaphoreCreateBinary();
   for(uint8_t i =0; i<128; i++){
@@ -1734,7 +1745,6 @@ void setup() {
   #endif
   setCANFilter(0x123,0x7ff);
   CAN_Start();
-
 
 
   //Set pin directions

@@ -17,4 +17,4 @@
 3. Adjust volume and octave to hear the range of frequencies and amplitudes that can be played
 4. Modulate the sound using lower frequencies by employing the LFO: both vibrato and tremolo can be adjusted to achieve FM and AM modulation respectively. 
 
-* Octave band is set on Master keyboard. Cacaded Keyboards adjust accordingly. 
+Note: Octave band is set on Master keyboard. Cacaded Keyboards adjust accordingly. 
